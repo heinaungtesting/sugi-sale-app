@@ -1,0 +1,47 @@
+import { Pool } from 'pg';
+import bcrypt from 'bcryptjs';
+
+const connectionString = process.env.SIGMA_RAG_PG_DSN ?? 'postgresql://sigma_rag@127.0.0.1:5433/sigma_rag';
+const pool = new Pool({ connectionString });
+
+async function main() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sugi_users (
+      id BIGSERIAL PRIMARY KEY,
+      username TEXT UNIQUE NOT NULL,
+      display_name TEXT NOT NULL,
+      pin_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES sugi_users(id)`);
+  await pool.query(`ALTER TABLE sales_logs ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES sugi_users(id)`);
+
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_products_user_category ON products(user_id, category, is_active)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sales_logs_user_date ON sales_logs(user_id, sold_date, created_at DESC)`);
+
+  const username = process.env.SUGI_DEFAULT_USERNAME ?? 'staff1';
+  const displayName = process.env.SUGI_DEFAULT_DISPLAY_NAME ?? 'Staff 1';
+  const pin = process.env.SUGI_DEFAULT_PIN ?? '1111';
+  const role = process.env.SUGI_DEFAULT_ROLE ?? 'admin';
+  const pinHash = await bcrypt.hash(pin, 10);
+
+  await pool.query(
+    `INSERT INTO sugi_users (username, display_name, pin_hash, role)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (username) DO UPDATE
+     SET display_name = EXCLUDED.display_name,
+         role = EXCLUDED.role,
+         is_active = TRUE,
+         updated_at = now()`,
+    [username, displayName, pinHash, role]
+  );
+
+  console.log(`Migration complete. Default login: ${username} / ${pin}`);
+}
+
+main().finally(() => pool.end());

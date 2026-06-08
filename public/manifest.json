@@ -1,0 +1,9 @@
+{
+  "name": "Sugi Sale Logger",
+  "short_name": "SugiLog",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eef7f4",
+  "theme_color": "#0f766e",
+  "icons": []
+}

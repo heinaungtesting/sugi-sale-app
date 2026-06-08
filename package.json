@@ -1,0 +1,30 @@
+{
+  "name": "sugi-sale-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Mobile-first multi-user Sugi sale logger",
+  "scripts": {
+    "dev": "next dev -H 0.0.0.0",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0",
+    "test": "vitest run",
+    "migrate": "tsx scripts/migrate.ts",
+    "seed:user": "tsx scripts/create-user.ts"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "next": "^16.0.7",
+    "pg": "^8.16.3",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/pg": "^8.15.6",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  }
+}
