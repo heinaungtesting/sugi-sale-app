@@ -64,7 +64,7 @@ export function SearchProductLogger({ products }: Props) {
 
       <div className="family-list search-results">
         {families.length === 0 ? (
-          <p className="muted">No matching product. Try category browse below.</p>
+          <p className="muted">No matching product. Check spelling or add this product from the admin dashboard.</p>
         ) : families.map((family) => (
           <section key={family.name} className="family-card" aria-label={family.name}>
             <h3>{family.name}</h3>

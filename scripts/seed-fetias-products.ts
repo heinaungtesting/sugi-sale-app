@@ -12,6 +12,18 @@ type SeedProduct = {
 
 const products: SeedProduct[] = [
   {
+    product_name: 'フェイタスZα ジクサス 7枚',
+    category: '外用鎮痛・湿布',
+    point_value: 80,
+    nicknames: ['fetas', 'fetias', 'feitas', 'フェイ', 'フェイタス', 'ジクサス', '湿布', '7枚'],
+  },
+  {
+    product_name: 'フェイタスZα ジクサス 14枚',
+    category: '外用鎮痛・湿布',
+    point_value: 120,
+    nicknames: ['fetas', 'fetias', 'feitas', 'フェイ', 'フェイタス', 'ジクサス', '湿布', '14枚'],
+  },
+  {
     product_name: 'フェイタスゲル',
     category: '外用鎮痛・湿布',
     point_value: 120,
