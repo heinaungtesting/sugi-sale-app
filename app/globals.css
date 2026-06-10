@@ -299,3 +299,290 @@ button, input {
   .admin-grid, .admin-card.compact { grid-template-columns: 1fr; }
   .month-header { grid-template-columns: 1fr 1fr; }
 }
+/* Sales page v2: reference-style mobile calendar */
+.sales-shell {
+  width: min(430px, 100%);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 16px;
+  background: #eef1f5;
+  color: #111827;
+}
+
+.sales-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.sales-topbar h1 {
+  margin: 0;
+  font-size: 24px;
+  letter-spacing: -0.03em;
+}
+
+.sales-eyebrow {
+  margin: 0 0 2px;
+  color: #7c8797;
+  font-weight: 800;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+
+.sales-nav {
+  display: flex;
+  gap: 6px;
+  background: #fff;
+  border-radius: 999px;
+  padding: 4px;
+  box-shadow: 0 8px 22px rgba(15,23,42,.08);
+}
+
+.sales-nav a {
+  color: #64748b;
+  text-decoration: none;
+  font-weight: 900;
+  font-size: 12px;
+  padding: 8px 9px;
+  border-radius: 999px;
+}
+
+.sales-nav a[aria-current="page"] {
+  color: white;
+  background: linear-gradient(135deg, #8b5cf6, #3b82f6);
+}
+
+.sales-page-v2 {
+  display: grid;
+  gap: 14px;
+}
+
+.sales-calendar-card,
+.sales-detail-card {
+  background: white;
+  border-radius: 28px;
+  padding: 18px;
+  box-shadow: 0 16px 40px rgba(15,23,42,.10);
+}
+
+.sales-calendar-header {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.sales-calendar-header strong {
+  text-align: center;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+
+.circle-button {
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #7c3aed;
+  font-weight: 1000;
+  font-size: 24px;
+}
+
+.sales-weekdays,
+.sales-date-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.sales-weekdays {
+  margin-bottom: 8px;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-align: center;
+}
+
+.sales-day {
+  min-width: 0;
+  min-height: 42px;
+  border: 0;
+  border-radius: 15px;
+  background: #fff;
+  color: #334155;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 1px;
+  padding: 4px 1px;
+}
+
+.sales-day strong {
+  font-size: 15px;
+}
+
+.sales-day small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #0f766e;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.sales-day.muted-day {
+  color: #cbd5e1;
+}
+
+.sales-day.selected-day-pill {
+  color: white;
+  background: linear-gradient(135deg, #c026d3, #2563eb);
+  border-radius: 999px;
+  box-shadow: 0 10px 22px rgba(79,70,229,.28);
+}
+
+.sales-day.selected-day-pill small {
+  color: rgba(255,255,255,.88);
+}
+
+.sales-detail-card {
+  display: grid;
+  gap: 14px;
+  min-height: 300px;
+}
+
+.sales-detail-header {
+  display: grid;
+  gap: 10px;
+}
+
+.sales-detail-header h2 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+
+.sales-detail-header p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-weight: 800;
+}
+
+.date-stepper {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  gap: 8px;
+}
+
+.date-stepper button,
+.add-product-toggle,
+.sale-controls button {
+  border: 0;
+  border-radius: 14px;
+  background: #eef2ff;
+  color: #4f46e5;
+  padding: 10px 12px;
+  font-weight: 900;
+}
+
+.sales-log-scroll {
+  display: grid;
+  gap: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.empty-entry {
+  margin: 8px 0 2px;
+  color: #94a3b8;
+  font-weight: 800;
+}
+
+.sales-log-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.sales-log-card strong,
+.sales-log-card span {
+  display: block;
+}
+
+.sales-log-card strong {
+  line-height: 1.35;
+}
+
+.sales-log-card span {
+  color: #64748b;
+  font-weight: 800;
+  margin-top: 2px;
+}
+
+.sale-controls {
+  display: grid;
+  grid-template-columns: 44px 44px 1fr;
+  gap: 8px;
+}
+
+.sale-controls .danger-soft {
+  color: #dc2626;
+  background: #fee2e2;
+}
+
+.add-product-toggle {
+  width: 100%;
+  color: white;
+  background: linear-gradient(135deg, #0f766e, #14b8a6);
+  min-height: 48px;
+  box-shadow: 0 10px 24px rgba(15,118,110,.18);
+}
+
+.sales-add-drawer {
+  display: grid;
+  gap: 10px;
+  max-height: 430px;
+  overflow: hidden;
+  border-top: 1px solid #e2e8f0;
+  padding-top: 12px;
+}
+
+.sales-add-drawer h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.sales-product-scroll {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.sales-family-card {
+  box-shadow: none;
+  border: 1px solid #e2e8f0;
+  background: #fbfdff;
+}
+
+@media (max-width: 390px) {
+  .sales-shell { padding: 12px; }
+  .sales-calendar-card, .sales-detail-card { border-radius: 24px; padding: 14px; }
+  .sales-day { min-height: 38px; border-radius: 13px; }
+  .sales-day strong { font-size: 14px; }
+  .sales-nav a { padding: 7px 7px; }
+}

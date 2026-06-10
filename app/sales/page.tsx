@@ -1,8 +1,7 @@
 import { redirect } from 'next/navigation';
-import { AppHeader } from '@/components/AppHeader';
 import { SalesCalendarClient } from '@/components/SalesCalendarClient';
 import { currentUser } from '@/lib/auth';
-import { listSearchableProducts, salesByDate, salesByMonth, todaySaleDate, todaySummary } from '@/lib/sugi-db';
+import { listSearchableProducts, salesByDate, salesByMonth, todaySaleDate } from '@/lib/sugi-db';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,15 +10,24 @@ export default async function SalesPage() {
   if (!user) redirect('/login');
   const todayDate = todaySaleDate();
   const month = todayDate.slice(0, 7);
-  const [products, today, monthTotals, day] = await Promise.all([
+  const [products, monthTotals, day] = await Promise.all([
     listSearchableProducts(user.id, '', 100),
-    todaySummary(user.id),
     salesByMonth(user.id, month),
     salesByDate(user.id, todayDate),
   ]);
   return (
-    <main className="shell">
-      <AppHeader user={user} totalPoints={today.total_points} totalItems={today.total_items} />
+    <main className="sales-shell">
+      <header className="sales-topbar">
+        <div>
+          <p className="sales-eyebrow">Sugi Logger</p>
+          <h1>Sales</h1>
+        </div>
+        <nav className="sales-nav" aria-label="Sales navigation">
+          <a href="/">Home</a>
+          <a href="/sales" aria-current="page">Sales</a>
+          {user.role === 'admin' && <a href="/admin">Admin</a>}
+        </nav>
+      </header>
       <SalesCalendarClient products={products} initialMonth={month} initialDate={todayDate} monthTotals={monthTotals} day={day} />
     </main>
   );
