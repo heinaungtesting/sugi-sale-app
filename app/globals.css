@@ -223,40 +223,48 @@ button, input {
 }
 
 .search-results {
-  margin-top: 2px;
+  margin-top: 0;
 }
 
 .family-list {
   display: grid;
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .family-card {
   background: white;
-  border-radius: 20px;
-  padding: 14px;
-  box-shadow: 0 4px 14px rgba(16, 32, 29, 0.08);
+  border-radius: 14px;
+  padding: 10px;
+  box-shadow: 0 3px 10px rgba(16, 32, 29, 0.08);
 }
 
 .family-card h3 {
-  margin: 0 0 10px;
-  font-size: 20px;
+  margin: 0 0 8px;
+  font-size: 15px;
+  line-height: 1.25;
+  min-height: 2.5em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .variant-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .variant-button {
-  min-height: 54px;
-  border: 2px solid #99d8cb;
-  border-radius: 14px;
+  min-height: 44px;
+  border: 1px solid #99d8cb;
+  border-radius: 12px;
   background: #ffffff;
   color: #0f766e;
   font-weight: 900;
-  font-size: 18px;
+  font-size: 16px;
+  padding: 6px 4px;
 }
 
 .variant-button:active {
