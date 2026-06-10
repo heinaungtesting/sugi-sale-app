@@ -22,7 +22,7 @@ describe('sales page mobile UI source', () => {
     const client = source('components/SalesCalendarClient.tsx');
     const css = source('app/globals.css');
     expect(client).toContain('showAddProduct');
-    expect(client).toContain('+ Quick add');
+    expect(client).toContain('+ Add product');
     expect(css).toMatch(/\.sales-log-scroll\s*{[^}]*overflow-y:\s*auto/s);
     expect(css).toMatch(/\.sales-add-drawer\s*{[^}]*max-height/s);
   });
@@ -42,7 +42,7 @@ describe('sales page mobile UI source', () => {
     const css = source('app/globals.css');
     expect(client).toContain('No products logged yet');
     expect(client).toContain('Tap a variant to log ×1');
-    expect(client).toContain('Quick add');
+    expect(client).toContain('Add product');
     expect(css).toMatch(/\.sales-empty-state\s*{/s);
     expect(css).toMatch(/\.sales-family-card h3\s*{/s);
   });

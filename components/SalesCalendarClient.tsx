@@ -169,7 +169,7 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
           {logs.length === 0 ? (
             <div className="sales-empty-state">
               <strong>No products logged yet</strong>
-              <span>Use Quick add below to log this date.</span>
+              <span>Use Add product below to log this date.</span>
             </div>
           ) : logs.map((log) => (
             <article className="sales-log-card" key={log.id}>
@@ -186,12 +186,12 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
           ))}
         </div>
 
-        <button className="add-product-toggle" aria-expanded={showAddProduct} onClick={() => setShowAddProduct((value) => !value)}>{showAddProduct ? 'Close Quick add' : '+ Quick add'}</button>
+        <button className="add-product-toggle" aria-expanded={showAddProduct} onClick={() => setShowAddProduct((value) => !value)}>{showAddProduct ? 'Close add product' : '+ Add product'}</button>
 
         {showAddProduct && (
           <div className="sales-add-drawer" aria-label={`Add product to ${selectedDate}`}>
             <div className="sales-add-heading">
-              <h3>Quick add</h3>
+              <h3>Add product</h3>
               <span>Tap a variant to log ×1</span>
             </div>
             <input className="search-input sales-search-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search product or shortcut" autoFocus />
