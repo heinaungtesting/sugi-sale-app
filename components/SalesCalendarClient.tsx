@@ -108,13 +108,25 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
   }
 
   const today = tokyoToday();
+  const monthPointTotal = totals.reduce((sum, total) => sum + total.total_points, 0);
+  const monthItemTotal = totals.reduce((sum, total) => sum + total.total_items, 0);
+  const monthActiveDays = totals.length;
+
   return (
     <section className="sales-page-v2">
       <section className="sales-calendar-card" aria-label="Monthly calendar">
         <div className="sales-calendar-header">
           <button className="circle-button" aria-label="Previous month" onClick={() => loadMonth(shiftMonth(month, -1))}>‹</button>
-          <strong>{monthLabel(month)}</strong>
+          <div className="month-title-block">
+            <strong>{monthLabel(month)}</strong>
+            <span>{monthActiveDays} active day{monthActiveDays === 1 ? '' : 's'}</span>
+          </div>
           <button className="circle-button" aria-label="Next month" onClick={() => loadMonth(shiftMonth(month, 1))}>›</button>
+        </div>
+        <div className="sales-summary-strip" aria-label="Month summary">
+          <div className="summary-chip primary"><span>Month</span><strong>{monthPointTotal}pt</strong></div>
+          <div className="summary-chip"><span>Items</span><strong>{monthItemTotal}</strong></div>
+          <div className="summary-chip"><span>Days</span><strong>{monthActiveDays}</strong></div>
         </div>
         <div className="sales-weekdays" aria-hidden="true">
           <span>SUN</span><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span><span>SAT</span>
@@ -123,11 +135,11 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
           {cells.map((cell) => {
             const total = totalByDate.get(cell.date);
             const isSelected = cell.date === selectedDate;
-            const className = ['sales-day', !cell.inMonth ? 'muted-day' : '', isSelected ? 'selected-day-pill' : ''].filter(Boolean).join(' ');
+            const className = ['sales-day', !cell.inMonth ? 'muted-day' : '', isSelected ? 'selected-day-pill' : '', total ? 'has-sales' : ''].filter(Boolean).join(' ');
             return (
-              <button key={cell.date} className={className} onClick={() => jumpTo(cell.date)}>
+              <button key={cell.date} className={className} aria-pressed={isSelected} onClick={() => jumpTo(cell.date)}>
                 <strong>{cell.day}</strong>
-                {total && !isSelected && <small>{total.total_points}pt</small>}
+                {total && !isSelected && <span className="sales-day-dot" aria-hidden="true" />}
               </button>
             );
           })}
@@ -137,8 +149,8 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
       <section className="sales-detail-card" aria-label="Selected date sales">
         <div className="sales-detail-header">
           <div>
+            <span className="detail-kicker">Selected date</span>
             <h2>{fullDateLabel(selectedDate)}</h2>
-            <p>{summary.total_points}pt / {summary.total_items} item{summary.total_items === 1 ? '' : 's'}</p>
           </div>
           <div className="date-stepper">
             <button onClick={() => jumpTo(shiftDate(selectedDate, -1))}>‹</button>
@@ -147,8 +159,19 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
           </div>
         </div>
 
+        <div className="sales-summary-strip day-strip" aria-label="Selected day summary">
+          <div className="summary-chip primary"><span>Points</span><strong>{summary.total_points}pt</strong></div>
+          <div className="summary-chip"><span>Items</span><strong>{summary.total_items}</strong></div>
+          <div className="summary-chip"><span>Logs</span><strong>{logs.length}</strong></div>
+        </div>
+
         <div className="sales-log-scroll">
-          {logs.length === 0 ? <p className="empty-entry">No entries</p> : logs.map((log) => (
+          {logs.length === 0 ? (
+            <div className="sales-empty-state">
+              <strong>No products logged yet</strong>
+              <span>Use Quick add below to log this date.</span>
+            </div>
+          ) : logs.map((log) => (
             <article className="sales-log-card" key={log.id}>
               <div>
                 <strong>{log.product_name}</strong>
@@ -163,12 +186,15 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
           ))}
         </div>
 
-        <button className="add-product-toggle" onClick={() => setShowAddProduct((value) => !value)}>{showAddProduct ? 'Close add product' : '+ Add product'}</button>
+        <button className="add-product-toggle" aria-expanded={showAddProduct} onClick={() => setShowAddProduct((value) => !value)}>{showAddProduct ? 'Close Quick add' : '+ Quick add'}</button>
 
         {showAddProduct && (
-          <div className="sales-add-drawer">
-            <h3>Add product to {selectedDate}</h3>
-            <input className="search-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search product" autoFocus />
+          <div className="sales-add-drawer" aria-label={`Add product to ${selectedDate}`}>
+            <div className="sales-add-heading">
+              <h3>Quick add</h3>
+              <span>Tap a variant to log ×1</span>
+            </div>
+            <input className="search-input sales-search-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search product or shortcut" autoFocus />
             <div className="sales-product-scroll">
               {families.map((family) => (
                 <section key={family.name} className="family-card sales-family-card">

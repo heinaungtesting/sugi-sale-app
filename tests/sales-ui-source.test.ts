@@ -22,8 +22,28 @@ describe('sales page mobile UI source', () => {
     const client = source('components/SalesCalendarClient.tsx');
     const css = source('app/globals.css');
     expect(client).toContain('showAddProduct');
-    expect(client).toContain('+ Add product');
+    expect(client).toContain('+ Quick add');
     expect(css).toMatch(/\.sales-log-scroll\s*{[^}]*overflow-y:\s*auto/s);
     expect(css).toMatch(/\.sales-add-drawer\s*{[^}]*max-height/s);
+  });
+
+  it('adds polished day activity dots and stronger selected-date summary chips', () => {
+    const client = source('components/SalesCalendarClient.tsx');
+    const css = source('app/globals.css');
+    expect(client).toContain('sales-day-dot');
+    expect(client).toContain('sales-summary-strip');
+    expect(client).toContain('summary-chip primary');
+    expect(css).toMatch(/\.sales-day-dot\s*{/s);
+    expect(css).toMatch(/\.summary-chip\.primary\s*{/s);
+  });
+
+  it('uses polished empty/add states for fast mobile logging', () => {
+    const client = source('components/SalesCalendarClient.tsx');
+    const css = source('app/globals.css');
+    expect(client).toContain('No products logged yet');
+    expect(client).toContain('Tap a variant to log ×1');
+    expect(client).toContain('Quick add');
+    expect(css).toMatch(/\.sales-empty-state\s*{/s);
+    expect(css).toMatch(/\.sales-family-card h3\s*{/s);
   });
 });
