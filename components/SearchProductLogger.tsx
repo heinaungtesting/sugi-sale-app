@@ -21,11 +21,12 @@ export function SearchProductLogger({ products }: Props) {
 
   async function log(variant: ProductVariant) {
     if (busyId) return;
-    setBusyId(variant.productId);
+    const busyKey = variant.variantId ?? variant.productId;
+    setBusyId(busyKey);
     const res = await fetch('/api/sales', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ product_id: variant.productId, quantity: 1 }),
+      body: JSON.stringify({ product_id: variant.productId, variant_id: variant.variantId, quantity: 1 }),
     });
     setBusyId(null);
     if (!res.ok) {
@@ -71,10 +72,10 @@ export function SearchProductLogger({ products }: Props) {
             <div className="variant-grid">
               {family.variants.map((variant) => (
                 <button
-                  key={variant.productId}
+                  key={`${variant.productId}:${variant.variantId ?? 'base'}`}
                   className="variant-button"
                   onClick={() => log(variant)}
-                  disabled={busyId === variant.productId}
+                  disabled={busyId === (variant.variantId ?? variant.productId)}
                   title={variant.productName}
                 >
                   {variant.label}

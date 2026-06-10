@@ -55,4 +55,25 @@ describe('product family grouping for main-page variant logger', () => {
 
     expect(families.map((family) => family.name)).toEqual(['口内炎パッチ', 'ヒビエイド', 'フェイタス']);
   });
+
+  it('prefers DB product_variants under the base product and hides duplicate product rows', () => {
+    const families = groupProductsIntoFamilies([
+      { ...product(7, 'フェイタスZα ジクサス', 50), variant_id: 7, variant_label: '7錠', variant_point_value: 50, variant_aliases: ['feitas7'] },
+      { ...product(7, 'フェイタスZα ジクサス', 100), variant_id: 8, variant_label: '14錠', variant_point_value: 100, variant_aliases: ['feitas14'] },
+      { ...product(7, 'フェイタスZα ジクサス', 150), variant_id: 9, variant_label: '21錠', variant_point_value: 150, variant_aliases: ['feitas21'] },
+      { ...product(7, 'フェイタスZα ジクサス', 120), variant_id: 31, variant_label: 'gel', variant_point_value: 120, variant_aliases: ['fetiasgel'] },
+      product(47, 'フェイタスゲル', 120),
+      product(48, 'フェイタスZα ジクサス 7枚', 80),
+      product(49, 'フェイタスZα ジクサス 14枚', 120),
+    ]);
+
+    expect(families).toHaveLength(1);
+    expect(families[0].name).toBe('フェイタス');
+    expect(families[0].variants.map((variant) => ({ productId: variant.productId, variantId: variant.variantId, label: variant.label, pointValue: variant.pointValue }))).toEqual([
+      { productId: 7, variantId: 7, label: '7', pointValue: 50 },
+      { productId: 7, variantId: 8, label: '14', pointValue: 100 },
+      { productId: 7, variantId: 9, label: '21', pointValue: 150 },
+      { productId: 7, variantId: 31, label: 'gel', pointValue: 120 },
+    ]);
+  });
 });

@@ -39,14 +39,29 @@ export async function listProductsByCategory(userId: number, category: string): 
   }));
 }
 
-function rowToProduct(r: { id: string; product_name: string; point_value: number; category: string | null; user_id: string | null; nicknames?: string[] | null }): SearchableProduct {
+function rowToProduct(r: {
+  id: string;
+  product_name: string;
+  point_value: number;
+  category: string | null;
+  user_id: string | null;
+  nicknames?: string[] | null;
+  variant_id?: string | null;
+  variant_label?: string | null;
+  variant_point_value?: number | null;
+  variant_nicknames?: string[] | null;
+}): SearchableProduct {
   return {
     id: Number(r.id),
     product_name: r.product_name,
-    point_value: Number(r.point_value),
+    point_value: Number(r.variant_point_value ?? r.point_value),
     category: categoryLabel(r.category),
     scope: r.user_id === null ? 'global' : 'private',
-    aliases: r.nicknames ?? [],
+    aliases: [...new Set([...(r.nicknames ?? []), ...(r.variant_nicknames ?? [])])],
+    variant_id: r.variant_id ? Number(r.variant_id) : null,
+    variant_label: r.variant_label ?? null,
+    variant_point_value: r.variant_point_value === null || r.variant_point_value === undefined ? null : Number(r.variant_point_value),
+    variant_aliases: r.variant_nicknames ?? [],
   };
 }
 
@@ -59,15 +74,24 @@ export async function listSearchableProducts(userId: number, search = '', limit 
     user_id: string | null;
     sale_count: string | null;
     nicknames: string[] | null;
+    variant_id: string | null;
+    variant_label: string | null;
+    variant_point_value: number | null;
+    variant_nicknames: string[] | null;
   }>(
     `SELECT p.id, p.product_name, p.point_value, COALESCE(NULLIF(TRIM(p.category), ''), 'その他') AS category, p.user_id,
             p.nicknames,
+            pv.id AS variant_id,
+            pv.variant_label,
+            pv.point_value AS variant_point_value,
+            pv.nicknames AS variant_nicknames,
             COALESCE(COUNT(s.id), 0)::text AS sale_count
      FROM products p
+     LEFT JOIN product_variants pv ON pv.product_id = p.id AND pv.is_active = TRUE
      LEFT JOIN sales_logs s ON s.product_id = p.id AND s.user_id = $1
      WHERE p.is_active = TRUE AND (p.user_id IS NULL OR p.user_id = $1)
-     GROUP BY p.id, p.product_name, p.point_value, p.category, p.user_id, p.nicknames
-     ORDER BY sale_count DESC, p.product_name
+     GROUP BY p.id, p.product_name, p.point_value, p.category, p.user_id, p.nicknames, pv.id, pv.variant_label, pv.point_value, pv.nicknames, pv.unit_count
+     ORDER BY sale_count DESC, p.product_name, pv.unit_count NULLS LAST, pv.id
      LIMIT 300`,
     [userId]
   );
@@ -101,8 +125,38 @@ export async function getVisibleProduct(userId: number, productId: number): Prom
   };
 }
 
-export async function logSale(userId: number, productId: number, quantity = 1) {
-  const product = await getVisibleProduct(userId, productId);
+export async function getVisibleProductVariant(userId: number, productId: number, variantId: number): Promise<Product | null> {
+  const row = await queryOne<{
+    id: string;
+    product_name: string;
+    point_value: number;
+    category: string | null;
+    user_id: string | null;
+    variant_label: string;
+    variant_point_value: number;
+  }>(
+    `SELECT p.id, p.product_name, p.category, p.user_id,
+            pv.variant_label,
+            pv.point_value AS variant_point_value,
+            pv.point_value AS point_value
+     FROM products p
+     JOIN product_variants pv ON pv.product_id = p.id
+     WHERE p.id = $1 AND p.is_active = TRUE AND (p.user_id IS NULL OR p.user_id = $2)
+       AND pv.id = $3 AND pv.is_active = TRUE`,
+    [productId, userId, variantId]
+  );
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    product_name: `${row.product_name} ${row.variant_label}`,
+    point_value: Number(row.variant_point_value),
+    category: categoryLabel(row.category),
+    scope: row.user_id === null ? 'global' : 'private',
+  };
+}
+
+export async function logSale(userId: number, productId: number, quantity = 1, variantId?: number | null) {
+  const product = variantId ? await getVisibleProductVariant(userId, productId, variantId) : await getVisibleProduct(userId, productId);
   if (!product || !isLoggableProduct(product)) return null;
   const qty = Math.max(1, Math.min(Number(quantity) || 1, 99));
   const sale = await queryOne<TodaySale>(

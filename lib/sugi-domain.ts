@@ -23,10 +23,15 @@ export type Product = {
 export type SearchableProduct = Product & {
   aliases?: string[];
   sale_count?: number;
+  variant_id?: number | null;
+  variant_label?: string | null;
+  variant_point_value?: number | null;
+  variant_aliases?: string[];
 };
 
 export type ProductVariant = {
   productId: number;
+  variantId?: number;
   label: string;
   productName: string;
   pointValue: number;
@@ -132,6 +137,14 @@ function familyNameForProduct(productName: string): string {
   return productName.trim();
 }
 
+function displayLabelForDbVariant(label: string): string {
+  const normalized = label.normalize('NFKC').trim();
+  const countMatch = normalized.match(/^(\d+)\s*(枚|錠|g|G|個|本|包|ml|mL)?$/);
+  if (countMatch) return countMatch[1];
+  if (/ゲル|ジェル|gel/i.test(normalized)) return 'gel';
+  return normalized;
+}
+
 function variantLabelForProduct(productName: string, familyName: string): string {
   const normalized = productName.normalize('NFKC');
   const sizeMatch = normalized.match(/(\d+)\s*(枚|g|G|個|本|錠|包|ml|mL)/);
@@ -148,10 +161,17 @@ function variantLabelForProduct(productName: string, familyName: string): string
 
 export function groupProductsIntoFamilies(products: SearchableProduct[], limit?: number): ProductFamily[] {
   const families = new Map<string, ProductFamily>();
+  const familiesWithDbVariants = new Set(
+    products
+      .filter((product) => product.variant_id && Number(product.variant_point_value ?? product.point_value) > 0)
+      .map((product) => familyNameForProduct(product.product_name))
+  );
 
   for (const product of products) {
-    if (!isLoggableProduct(product)) continue;
     const familyName = familyNameForProduct(product.product_name);
+    if (!product.variant_id && familiesWithDbVariants.has(familyName)) continue;
+    const pointValue = Number(product.variant_point_value ?? product.point_value);
+    if (!isLoggableProduct({ point_value: pointValue })) continue;
     const family = families.get(familyName) ?? {
       name: familyName,
       aliases: [],
@@ -159,14 +179,16 @@ export function groupProductsIntoFamilies(products: SearchableProduct[], limit?:
       saleCount: 0,
     };
     const aliases = new Set([...family.aliases, ...(product.aliases ?? [])]);
+    (product.variant_aliases ?? []).forEach((alias) => aliases.add(alias));
     const saleCount = product.sale_count ?? 0;
     family.aliases = [...aliases];
     family.saleCount = Math.max(family.saleCount, saleCount);
     family.variants.push({
       productId: product.id,
-      label: variantLabelForProduct(product.product_name, familyName),
+      variantId: product.variant_id ? Number(product.variant_id) : undefined,
+      label: product.variant_label ? displayLabelForDbVariant(product.variant_label) : variantLabelForProduct(product.product_name, familyName),
       productName: product.product_name,
-      pointValue: product.point_value,
+      pointValue,
       saleCount,
     });
     families.set(familyName, family);
@@ -176,8 +198,12 @@ export function groupProductsIntoFamilies(products: SearchableProduct[], limit?:
     .map((family) => ({
       ...family,
       variants: family.variants.sort((a, b) => {
-        const salesDiff = b.saleCount - a.saleCount;
-        if (salesDiff !== 0) return salesDiff;
+        const aNumber = Number(a.label);
+        const bNumber = Number(b.label);
+        const aIsNumber = Number.isFinite(aNumber);
+        const bIsNumber = Number.isFinite(bNumber);
+        if (aIsNumber && bIsNumber && aNumber !== bNumber) return aNumber - bNumber;
+        if (aIsNumber !== bIsNumber) return aIsNumber ? -1 : 1;
         return a.productId - b.productId;
       }),
     }))
