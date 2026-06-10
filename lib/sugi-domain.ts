@@ -25,6 +25,7 @@ export type SearchableProduct = Product & {
   sale_count?: number;
   variant_id?: number | null;
   variant_label?: string | null;
+  variant_display_shortcut?: string | null;
   variant_point_value?: number | null;
   variant_aliases?: string[];
 };
@@ -186,7 +187,7 @@ export function groupProductsIntoFamilies(products: SearchableProduct[], limit?:
     family.variants.push({
       productId: product.id,
       variantId: product.variant_id ? Number(product.variant_id) : undefined,
-      label: product.variant_label ? displayLabelForDbVariant(product.variant_label) : variantLabelForProduct(product.product_name, familyName),
+      label: product.variant_display_shortcut?.trim() || (product.variant_label ? displayLabelForDbVariant(product.variant_label) : variantLabelForProduct(product.product_name, familyName)),
       productName: product.product_name,
       pointValue,
       saleCount,

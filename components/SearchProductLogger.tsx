@@ -12,6 +12,7 @@ export function SearchProductLogger({ products }: Props) {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [toast, setToast] = useState<string | null>(null);
+  const [lastLogged, setLastLogged] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
 
   const families = useMemo(() => {
@@ -34,6 +35,7 @@ export function SearchProductLogger({ products }: Props) {
       return;
     }
     const data = await res.json();
+    setLastLogged(true);
     setToast(`${data.product_name}を記録しました`);
     router.refresh();
   }
@@ -41,7 +43,8 @@ export function SearchProductLogger({ products }: Props) {
   async function undo() {
     const res = await fetch('/api/sales/latest', { method: 'DELETE' });
     if (res.ok) {
-      setToast('直前を取り消しました');
+      setLastLogged(false);
+      setToast(null);
       router.refresh();
     }
   }
@@ -89,7 +92,7 @@ export function SearchProductLogger({ products }: Props) {
       {toast && (
         <div className="toast">
           <div>{toast}</div>
-          <button onClick={undo}>直前を取り消す</button>
+          {lastLogged && <button onClick={undo}>直前を取り消す</button>}
         </div>
       )}
     </section>

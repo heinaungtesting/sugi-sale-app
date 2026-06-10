@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 
 type Props = {
-  user: { displayName: string };
+  user: { displayName: string; role?: string };
   totalPoints: number;
   totalItems: number;
   backHref?: string;
@@ -24,6 +24,11 @@ export function AppHeader({ user, totalPoints, totalItems, backHref }: Props) {
         </div>
         <button className="logout" onClick={logout}>Logout</button>
       </div>
+      <nav className="nav" aria-label="Main navigation">
+        <a href="/">Home</a>
+        <a href="/sales">Sales</a>
+        {user.role === 'admin' && <a href="/admin">Admin</a>}
+      </nav>
       <div className="stats">
         <div className="stat"><span>Today</span><strong>{totalPoints}pt</strong></div>
         <div className="stat"><span>Items</span><strong>{totalItems}</strong></div>

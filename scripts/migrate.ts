@@ -20,6 +20,16 @@ async function main() {
 
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES sugi_users(id)`);
   await pool.query(`ALTER TABLE sales_logs ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES sugi_users(id)`);
+  await pool.query(`ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS display_shortcut TEXT`);
+  await pool.query(`
+    UPDATE product_variants
+    SET display_shortcut = CASE
+      WHEN variant_label ~ '^\\d+' THEN regexp_replace(variant_label, '[^0-9].*$', '')
+      WHEN lower(variant_label) = 'gel' THEN 'gel'
+      ELSE variant_label
+    END
+    WHERE display_shortcut IS NULL OR trim(display_shortcut) = ''
+  `);
 
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_products_user_category ON products(user_id, category, is_active)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sales_logs_user_date ON sales_logs(user_id, sold_date, created_at DESC)`);
