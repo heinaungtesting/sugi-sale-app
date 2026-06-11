@@ -8,21 +8,37 @@ type Props = {
   products: SearchableProduct[];
 };
 
+function busyKeyFor(variant: ProductVariant) {
+  return `${variant.productId}:${variant.variantId ?? 'base'}`;
+}
+
 export function SearchProductLogger({ products }: Props) {
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [toast, setToast] = useState<string | null>(null);
   const [lastLogged, setLastLogged] = useState(false);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const baseFamilies = useMemo(() => {
+    const ranked = rankProductsForSearch(products, '', 80);
+    return groupProductsIntoFamilies(ranked, 12);
+  }, [products]);
+
+  const topVariants = useMemo(() => (
+    baseFamilies
+      .flatMap((family) => family.variants.slice(0, 2).map((variant) => ({ familyName: family.name, variant })))
+      .slice(0, 6)
+  ), [baseFamilies]);
 
   const families = useMemo(() => {
-    const ranked = rankProductsForSearch(products, query, query.trim() ? 60 : 80);
-    return groupProductsIntoFamilies(ranked, query.trim() ? 20 : 12);
-  }, [products, query]);
+    if (!query.trim()) return baseFamilies;
+    const ranked = rankProductsForSearch(products, query, 60);
+    return groupProductsIntoFamilies(ranked, 20);
+  }, [baseFamilies, products, query]);
 
   async function log(variant: ProductVariant) {
     if (busyId) return;
-    const busyKey = variant.variantId ?? variant.productId;
+    const busyKey = busyKeyFor(variant);
     setBusyId(busyKey);
     const res = await fetch('/api/sales', {
       method: 'POST',
@@ -50,40 +66,80 @@ export function SearchProductLogger({ products }: Props) {
   }
 
   return (
-    <section className="search-panel" aria-label="Product search logger">
-      <label className="search-label" htmlFor="product-search">Search product</label>
-      <input
-        id="product-search"
-        className="search-input"
-        value={query}
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder="hibi, kuchi, fetas, 口内, フェイ..."
-        autoCapitalize="none"
-        autoCorrect="off"
-        spellCheck={false}
-        inputMode="search"
-      />
+    <section className="search-panel shift-log-panel" aria-label="Product search logger">
+      <div className="quick-log-card" aria-label="Quick log favorites">
+        <div className="section-heading-row">
+          <div>
+            <h2>Quick log</h2>
+            <p>Most-used variants for one-tap logging.</p>
+          </div>
+        </div>
+        <div className="quick-log-strip">
+          {topVariants.map(({ familyName, variant }) => {
+            const busyKey = busyKeyFor(variant);
+            return (
+              <button
+                key={`quick:${busyKey}`}
+                className="quick-log-button"
+                onClick={() => log(variant)}
+                disabled={busyId === busyKey}
+                title={variant.productName}
+              >
+                <span>{familyName}</span>
+                <strong>{variant.label}</strong>
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
-      {!query.trim() && <p className="muted quick-hint">Frequent product groups first. Tap a variant to log.</p>}
+      <div className="search-sticky-card">
+        <label className="search-label" htmlFor="product-search">Search product</label>
+        <input
+          id="product-search"
+          className="search-input"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search product or shortcut"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          inputMode="search"
+        />
+        {!query.trim() && <p className="muted quick-hint">Try hibi, kuchi, fetas, pripink. Tap a variant to log ×1.</p>}
+      </div>
+
+      <div className="section-heading-row product-grid-heading">
+        <div>
+          <h2>{query.trim() ? 'Search results' : 'All products'}</h2>
+          <p>{query.trim() ? 'Filtered by shortcut/name.' : 'Frequent product groups first.'}</p>
+        </div>
+      </div>
 
       <div className="family-list search-results">
         {families.length === 0 ? (
-          <p className="muted">No matching product. Check spelling or add this product from the admin dashboard.</p>
+          <div className="recent-empty-state no-product-state">
+            <strong>No matching product</strong>
+            <span>Check spelling or add it from Admin.</span>
+          </div>
         ) : families.map((family) => (
           <section key={family.name} className="family-card" aria-label={family.name}>
             <h3>{family.name}</h3>
             <div className="variant-grid">
-              {family.variants.map((variant) => (
-                <button
-                  key={`${variant.productId}:${variant.variantId ?? 'base'}`}
-                  className="variant-button"
-                  onClick={() => log(variant)}
-                  disabled={busyId === (variant.variantId ?? variant.productId)}
-                  title={variant.productName}
-                >
-                  {variant.label}
-                </button>
-              ))}
+              {family.variants.map((variant) => {
+                const busyKey = busyKeyFor(variant);
+                return (
+                  <button
+                    key={busyKey}
+                    className="variant-button"
+                    onClick={() => log(variant)}
+                    disabled={busyId === busyKey}
+                    title={variant.productName}
+                  >
+                    {variant.label}
+                  </button>
+                );
+              })}
             </div>
           </section>
         ))}

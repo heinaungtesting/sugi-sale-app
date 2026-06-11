@@ -13,8 +13,8 @@ describe('mobile sale logger product grid CSS', () => {
   });
 
   it('keeps variant shortcuts smaller but still finger touchable', () => {
-    expect(css).toMatch(/\.variant-button\s*\{[^}]*min-height:\s*44px/s);
-    expect(css).toMatch(/\.variant-button\s*\{[^}]*font-size:\s*16px/s);
+    expect(css).toMatch(/\.variant-button\s*\{[^}]*min-height:\s*50px/s);
+    expect(css).toMatch(/\.variant-button\s*\{[^}]*font-size:\s*17px/s);
     expect(css).toMatch(/\.variant-grid\s*\{[^}]*gap:\s*6px/s);
   });
 });

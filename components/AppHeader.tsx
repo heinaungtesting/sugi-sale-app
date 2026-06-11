@@ -16,22 +16,22 @@ export function AppHeader({ user, totalPoints, totalItems, backHref }: Props) {
     router.replace('/login');
   }
   return (
-    <header className="header">
-      <div className="header-row">
+    <header className="header home-hero">
+      <div className="header-row hero-top-row">
         <div>
-          {backHref ? <a className="back" href={backHref}>← Categories</a> : <div className="muted" style={{ color: 'rgba(255,255,255,.85)' }}>Logged by</div>}
-          <div className="user-name">{user.displayName}</div>
+          {backHref ? <a className="back" href={backHref}>← Categories</a> : <div className="hero-kicker">Logged by {user.displayName}</div>}
+          <h1>Shift logger</h1>
         </div>
         <button className="logout" onClick={logout}>Logout</button>
       </div>
-      <nav className="nav" aria-label="Main navigation">
-        <a href="/">Home</a>
-        <a href="/sales">Sales</a>
+      <nav className="nav hero-nav" aria-label="Main navigation">
+        <a href="/" aria-current="page">Home</a>
+        <a href="/sales">Open calendar</a>
         {user.role === 'admin' && <a href="/admin">Admin</a>}
       </nav>
-      <div className="stats">
-        <div className="stat"><span>Today</span><strong>{totalPoints}pt</strong></div>
-        <div className="stat"><span>Items</span><strong>{totalItems}</strong></div>
+      <div className="hero-metrics" aria-label="Today summary">
+        <div className="hero-metric primary"><span>Today logged</span><strong>{totalItems}</strong><small>items</small></div>
+        <div className="hero-metric"><span>Points</span><strong>{totalPoints}pt</strong><small>today</small></div>
       </div>
     </header>
   );

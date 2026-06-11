@@ -18,15 +18,28 @@ export default async function HomePage() {
     <main className="shell">
       <AppHeader user={user} totalPoints={today.total_points} totalItems={today.total_items} />
       <SearchProductLogger products={products} />
-      <h2 className="section-title">Recent today</h2>
-      <div className="recent-list">
-        {today.recent.length === 0 ? <p className="muted">No sales yet.</p> : today.recent.map((sale) => (
-          <div className="recent-row" key={sale.id}>
-            <strong>{sale.product_name}</strong>
-            <span className="muted">×{sale.quantity} = {sale.total_points}pt</span>
+      <section className="recent-card" aria-label="Recent sales today">
+        <div className="section-heading-row">
+          <div>
+            <h2>Recent today</h2>
+            <p>Latest logged products for quick checking.</p>
           </div>
-        ))}
-      </div>
+          <a href="/sales">Edit</a>
+        </div>
+        <div className="recent-list">
+          {today.recent.length === 0 ? (
+            <div className="recent-empty-state">
+              <strong>No sales yet</strong>
+              <span>Use Quick log or search above to start.</span>
+            </div>
+          ) : today.recent.map((sale) => (
+            <div className="recent-row" key={sale.id}>
+              <strong>{sale.product_name}</strong>
+              <span className="muted">×{sale.quantity} = {sale.total_points}pt</span>
+            </div>
+          ))}
+        </div>
+      </section>
     </main>
   );
 }
