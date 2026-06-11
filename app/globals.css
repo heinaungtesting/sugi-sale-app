@@ -45,11 +45,43 @@ button, input {
   font-size: 18px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.language-toggle {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid rgba(255,255,255,.30);
+  border-radius: 14px;
+  background: rgba(255,255,255,.14);
+}
+
+.language-toggle button {
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(255,255,255,.82);
+  padding: 7px 8px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.language-toggle button.active {
+  background: white;
+  color: #0f766e;
+}
+
 .logout {
   color: white;
   background: rgba(255,255,255,0.18);
   border: 1px solid rgba(255,255,255,0.35);
-  border-radius: 999px;
+  border-radius: 14px;
   padding: 8px 12px;
 }
 

@@ -23,11 +23,11 @@ describe('home shift-speed UI contract', () => {
 
   it('uses sticky search and intentional card empty states on the home page', () => {
     const logger = source('components/SearchProductLogger.tsx');
-    const page = source('app/page.tsx');
+    const client = source('components/HomeShiftLoggerClient.tsx');
     const css = source('app/globals.css');
     expect(logger).toContain('search-sticky-card');
     expect(logger).toContain('Search product or shortcut');
-    expect(page).toContain('recent-empty-state');
+    expect(client).toContain('recent-empty-state');
     expect(css).toMatch(/\.search-sticky-card\s*{[^}]*position:\s*sticky/s);
     expect(css).toMatch(/\.quick-log-strip\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
     expect(css).not.toMatch(/\.quick-log-strip\s*{[^}]*overflow-x:\s*auto/s);
