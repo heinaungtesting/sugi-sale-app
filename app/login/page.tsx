@@ -22,10 +22,6 @@ export default function LoginPage() {
         setError('Wrong username or PIN');
         return;
       }
-      const data = await res.json().catch(() => ({}));
-      if (data.token) {
-        document.cookie = `sugi_session=${data.token}; Path=/; Max-Age=2592000; SameSite=Lax`;
-      }
       window.location.assign('/');
     } catch {
       setError('Network error. Open with http://168.144.35.24:3100/login and try again.');

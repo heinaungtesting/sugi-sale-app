@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { AppHeader } from '@/components/AppHeader';
+import { PageCard } from '@/components/PageCard';
 import { SearchProductLogger } from '@/components/SearchProductLogger';
 import type { SearchableProduct, TodaySale } from '@/lib/sugi-domain';
 
@@ -17,28 +19,61 @@ type Props = {
   };
 };
 
+const LANGUAGE_STORAGE_KEY = 'sugi-language';
+
 const copy = {
   en: {
     recentTitle: 'Recent today',
-    recentDescription: 'Latest logged products for quick checking.',
-    edit: 'Edit',
+    recentDescription: 'Latest logs. Fix mistakes here or open full history.',
+    edit: 'History',
     emptyTitle: 'No sales yet',
-    emptyHelp: 'Use Quick log or search above to start.',
+    emptyHelp: 'Search a product above to log the first sale.',
     aria: 'Recent sales today',
+    decrease: 'Decrease',
+    increase: 'Increase',
+    remove: 'Undo',
   },
   ja: {
     recentTitle: '今日の記録',
-    recentDescription: '直近で記録した商品を確認できます。',
-    edit: '編集',
+    recentDescription: '直近の記録だけ。間違えたらここで修正できます。',
+    edit: '履歴',
     emptyTitle: '今日の記録はまだありません',
-    emptyHelp: 'すぐ記録または検索から始めてください。',
+    emptyHelp: '上の商品検索から最初の記録をしてください。',
     aria: '今日の販売記録',
+    decrease: '減らす',
+    increase: '増やす',
+    remove: '取消',
   },
 } satisfies Record<Language, Record<string, string>>;
 
 export function HomeShiftLoggerClient({ user, products, today }: Props) {
-  const [language, setLanguage] = useState<Language>('en');
+  const router = useRouter();
+  const [language, setLanguage] = useState<Language>('ja');
   const t = copy[language];
+
+  useEffect(() => {
+    const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY);
+    if (saved === 'en' || saved === 'ja') setLanguage(saved);
+  }, []);
+
+  function changeLanguage(nextLanguage: Language) {
+    setLanguage(nextLanguage);
+    localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+  }
+
+  async function changeRecentQty(id: number, delta: number) {
+    const res = await fetch(`/api/sales/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delta }),
+    });
+    if (res.ok) router.refresh();
+  }
+
+  async function deleteRecentSale(id: number) {
+    const res = await fetch(`/api/sales/${id}`, { method: 'DELETE' });
+    if (res.ok) router.refresh();
+  }
 
   return (
     <>
@@ -47,17 +82,17 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
         totalPoints={today.total_points}
         totalItems={today.total_items}
         language={language}
-        onLanguageChange={setLanguage}
+        onLanguageChange={changeLanguage}
+        activePage="home"
       />
       <SearchProductLogger products={products} language={language} />
-      <section className="recent-card" aria-label={t.aria}>
-        <div className="section-heading-row">
-          <div>
-            <h2>{t.recentTitle}</h2>
-            <p>{t.recentDescription}</p>
-          </div>
-          <a href="/sales">{t.edit}</a>
-        </div>
+      <PageCard
+        title={t.recentTitle}
+        description={t.recentDescription}
+        action={<a href="/sales">{t.edit}</a>}
+        className="recent-card"
+        aria-label={t.aria}
+      >
         <div className="recent-list">
           {today.recent.length === 0 ? (
             <div className="recent-empty-state">
@@ -65,13 +100,20 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
               <span>{t.emptyHelp}</span>
             </div>
           ) : today.recent.map((sale) => (
-            <div className="recent-row" key={sale.id}>
-              <strong>{sale.product_name}</strong>
-              <span className="muted">×{sale.quantity} = {sale.total_points}pt</span>
+            <div className="recent-row recent-correction-row" key={sale.id}>
+              <div>
+                <strong>{sale.product_name}</strong>
+                <span className="muted">×{sale.quantity} = {sale.total_points}pt</span>
+              </div>
+              <div className="recent-actions">
+                <button aria-label={`${t.decrease} ${sale.product_name}`} onClick={() => changeRecentQty(sale.id, -1)}>−</button>
+                <button aria-label={`${t.increase} ${sale.product_name}`} onClick={() => changeRecentQty(sale.id, 1)}>+</button>
+                <button className="danger-soft" onClick={() => deleteRecentSale(sale.id)}>{t.remove}</button>
+              </div>
             </div>
           ))}
         </div>
-      </section>
+      </PageCard>
     </>
   );
 }

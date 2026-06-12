@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { groupProductsIntoFamilies, rankProductsForSearch, type ProductVariant, type SearchableProduct } from '@/lib/sugi-domain';
+import { PageCard } from '@/components/PageCard';
+import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/lib/sugi-domain';
 
 type MonthTotal = { sold_date: string; total_points: number; total_items: number };
 type SaleLog = { id: number; product_name: string; quantity: number; total_points: number; points_per_item: number };
@@ -18,11 +19,11 @@ type Props = {
 
 function monthLabel(month: string) {
   const [year, m] = month.split('-').map(Number);
-  return new Intl.DateTimeFormat('en', { timeZone: 'UTC', month: 'long', year: 'numeric' }).format(new Date(Date.UTC(year, m - 1, 1)));
+  return new Intl.DateTimeFormat('ja-JP', { timeZone: 'UTC', year: 'numeric', month: 'long' }).format(new Date(Date.UTC(year, m - 1, 1)));
 }
 function fullDateLabel(date: string) {
   const [year, month, day] = date.split('-').map(Number);
-  return new Intl.DateTimeFormat('en', { timeZone: 'UTC', month: 'long', day: 'numeric', year: 'numeric' }).format(new Date(Date.UTC(year, month - 1, day)));
+  return new Intl.DateTimeFormat('ja-JP', { timeZone: 'UTC', year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(Date.UTC(year, month - 1, day)));
 }
 function tokyoToday() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
@@ -50,6 +51,11 @@ function calendarCells(month: string): CalendarCell[] {
   });
 }
 
+function variantDisplayLabel(variant: ProductVariant, family: ProductFamily) {
+  if (family.variants.length === 1 && variant.label === '標準') return '追加';
+  return variant.label;
+}
+
 export function SalesCalendarClient({ products, initialMonth, initialDate, monthTotals, day }: Props) {
   const router = useRouter();
   const [month, setMonth] = useState(initialMonth);
@@ -57,11 +63,16 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
   const [totals, setTotals] = useState(monthTotals);
   const [logs, setLogs] = useState(day.logs);
   const [summary, setSummary] = useState({ total_points: day.total_points, total_items: day.total_items });
-  const [query, setQuery] = useState('');
-  const [showAddProduct, setShowAddProduct] = useState(false);
+  const [addQuery, setAddQuery] = useState('');
+  const [busyId, setBusyId] = useState<string | null>(null);
   const totalByDate = useMemo(() => new Map(totals.map((t) => [t.sold_date, t])), [totals]);
   const cells = useMemo(() => calendarCells(month), [month]);
-  const families = useMemo(() => groupProductsIntoFamilies(rankProductsForSearch(products, query, query.trim() ? 60 : 80), query.trim() ? 20 : 10), [products, query]);
+  const addFamilies = useMemo(() => {
+    const query = addQuery.trim();
+    if (!query) return [];
+    const ranked = rankProductsForSearch(products, query, 40);
+    return groupProductsIntoFamilies(ranked, 8);
+  }, [addQuery, products]);
 
   async function loadDate(date: string) {
     setSelectedDate(date);
@@ -82,19 +93,6 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
     const res = await fetch(`/api/sales/month?month=${month}`);
     if (res.ok) setTotals(await res.json());
   }
-  async function addVariant(variant: ProductVariant) {
-    const res = await fetch('/api/sales', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ product_id: variant.productId, variant_id: variant.variantId, quantity: 1, sold_date: selectedDate }),
-    });
-    if (res.ok) {
-      await refreshSelected();
-      setShowAddProduct(false);
-      setQuery('');
-      router.refresh();
-    }
-  }
   async function deleteLog(id: number) {
     const res = await fetch(`/api/sales/${id}`, { method: 'DELETE' });
     if (res.ok) { await refreshSelected(); router.refresh(); }
@@ -103,33 +101,40 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
     const res = await fetch(`/api/sales/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delta }) });
     if (res.ok) { await refreshSelected(); router.refresh(); }
   }
+  async function addProductToSelectedDate(variant: ProductVariant) {
+    const busyKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
+    setBusyId(busyKey);
+    const res = await fetch('/api/sales', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: variant.productId, variant_id: variant.variantId, quantity: 1, sold_date: selectedDate }),
+    });
+    setBusyId(null);
+    if (res.ok) {
+      setAddQuery('');
+      await refreshSelected();
+      router.refresh();
+    }
+  }
   async function jumpTo(date: string) {
     await loadDate(date);
   }
 
   const today = tokyoToday();
-  const monthPointTotal = totals.reduce((sum, total) => sum + total.total_points, 0);
-  const monthItemTotal = totals.reduce((sum, total) => sum + total.total_items, 0);
-  const monthActiveDays = totals.length;
 
   return (
     <section className="sales-page-v2">
-      <section className="sales-calendar-card" aria-label="Monthly calendar">
+      <PageCard className="sales-calendar-card" aria-label="月間カレンダー">
         <div className="sales-calendar-header">
-          <button className="circle-button" aria-label="Previous month" onClick={() => loadMonth(shiftMonth(month, -1))}>‹</button>
+          <button className="circle-button" aria-label="前の月" onClick={() => loadMonth(shiftMonth(month, -1))}>‹</button>
           <div className="month-title-block">
             <strong>{monthLabel(month)}</strong>
-            <span>{monthActiveDays} active day{monthActiveDays === 1 ? '' : 's'}</span>
+            <span>日付をタップして記録を確認</span>
           </div>
-          <button className="circle-button" aria-label="Next month" onClick={() => loadMonth(shiftMonth(month, 1))}>›</button>
-        </div>
-        <div className="sales-summary-strip" aria-label="Month summary">
-          <div className="summary-chip primary"><span>Month</span><strong>{monthPointTotal}pt</strong></div>
-          <div className="summary-chip"><span>Items</span><strong>{monthItemTotal}</strong></div>
-          <div className="summary-chip"><span>Days</span><strong>{monthActiveDays}</strong></div>
+          <button className="circle-button" aria-label="次の月" onClick={() => loadMonth(shiftMonth(month, 1))}>›</button>
         </div>
         <div className="sales-weekdays" aria-hidden="true">
-          <span>SUN</span><span>MON</span><span>TUE</span><span>WED</span><span>THU</span><span>FRI</span><span>SAT</span>
+          <span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span>
         </div>
         <div className="sales-date-grid">
           {cells.map((cell) => {
@@ -144,32 +149,62 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
             );
           })}
         </div>
-      </section>
+      </PageCard>
 
-      <section className="sales-detail-card" aria-label="Selected date sales">
+      <PageCard className="sales-detail-card" aria-label="選択日の記録">
         <div className="sales-detail-header">
           <div>
-            <span className="detail-kicker">Selected date</span>
+            <span className="detail-kicker">選択日</span>
             <h2>{fullDateLabel(selectedDate)}</h2>
+            <p className="selected-day-total">{summary.total_items}点 · {summary.total_points}pt</p>
           </div>
           <div className="date-stepper">
-            <button onClick={() => jumpTo(shiftDate(selectedDate, -1))}>‹</button>
-            <button onClick={() => jumpTo(today)}>Today</button>
-            <button onClick={() => jumpTo(shiftDate(selectedDate, 1))}>›</button>
+            <button aria-label="前の日" onClick={() => jumpTo(shiftDate(selectedDate, -1))}>‹</button>
+            <button onClick={() => jumpTo(today)}>今日</button>
+            <button aria-label="次の日" onClick={() => jumpTo(shiftDate(selectedDate, 1))}>›</button>
           </div>
         </div>
 
-        <div className="sales-summary-strip day-strip" aria-label="Selected day summary">
-          <div className="summary-chip primary"><span>Points</span><strong>{summary.total_points}pt</strong></div>
-          <div className="summary-chip"><span>Items</span><strong>{summary.total_items}</strong></div>
-          <div className="summary-chip"><span>Logs</span><strong>{logs.length}</strong></div>
+        <div className="calendar-add-inline" aria-label="選択日に商品を追加">
+          <label htmlFor="calendar-add-search">選択日に商品を追加</label>
+          <input
+            id="calendar-add-search"
+            className="calendar-add-input"
+            value={addQuery}
+            onChange={(event) => setAddQuery(event.target.value)}
+            placeholder="商品検索"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+          />
+          {addQuery.trim() && (
+            <div className="calendar-add-results">
+              {addFamilies.length === 0 ? (
+                <span className="muted">商品が見つかりません</span>
+              ) : addFamilies.map((family) => (
+                <section key={family.name} className="calendar-add-family" aria-label={`${family.name}を追加`}>
+                  <strong>{family.name}</strong>
+                  <div className="calendar-add-variants">
+                    {family.variants.map((variant) => {
+                      const busyKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
+                      return (
+                        <button key={busyKey} onClick={() => addProductToSelectedDate(variant)} disabled={busyId === busyKey} title={variant.productName}>
+                          {variantDisplayLabel(variant, family)}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="sales-log-scroll">
           {logs.length === 0 ? (
             <div className="sales-empty-state">
-              <strong>No products logged yet</strong>
-              <span>Use Add product below to log this date.</span>
+              <strong>記録はありません</strong>
+              <span>別の日付を選ぶか、ここから商品を追加してください。</span>
             </div>
           ) : logs.map((log) => (
             <article className="sales-log-card" key={log.id}>
@@ -178,36 +213,14 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
                 <span>×{log.quantity} = {log.total_points}pt</span>
               </div>
               <div className="small-actions sale-controls">
-                <button aria-label={`Decrease ${log.product_name}`} onClick={() => changeQty(log.id, -1)}>−</button>
-                <button aria-label={`Increase ${log.product_name}`} onClick={() => changeQty(log.id, 1)}>+</button>
-                <button className="danger-soft" onClick={() => deleteLog(log.id)}>Remove</button>
+                <button aria-label={`${log.product_name}を減らす`} onClick={() => changeQty(log.id, -1)}>−</button>
+                <button aria-label={`${log.product_name}を増やす`} onClick={() => changeQty(log.id, 1)}>+</button>
+                <button className="danger-soft" onClick={() => deleteLog(log.id)}>削除</button>
               </div>
             </article>
           ))}
         </div>
-
-        <button className="add-product-toggle" aria-expanded={showAddProduct} onClick={() => setShowAddProduct((value) => !value)}>{showAddProduct ? 'Close add product' : '+ Add product'}</button>
-
-        {showAddProduct && (
-          <div className="sales-add-drawer" aria-label={`Add product to ${selectedDate}`}>
-            <div className="sales-add-heading">
-              <h3>Add product</h3>
-              <span>Tap a variant to log ×1</span>
-            </div>
-            <input className="search-input sales-search-input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search product or shortcut" autoFocus />
-            <div className="sales-product-scroll">
-              {families.map((family) => (
-                <section key={family.name} className="family-card sales-family-card">
-                  <h3>{family.name}</h3>
-                  <div className="variant-grid">
-                    {family.variants.map((variant) => <button key={`${variant.productId}:${variant.variantId ?? 'base'}`} className="variant-button" onClick={() => addVariant(variant)}>{variant.label}</button>)}
-                  </div>
-                </section>
-              ))}
-            </div>
-          </div>
-        )}
-      </section>
+      </PageCard>
     </section>
   );
 }

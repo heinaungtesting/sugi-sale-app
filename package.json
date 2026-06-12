@@ -9,7 +9,9 @@
     "start": "next start -H 0.0.0.0",
     "test": "vitest run",
     "migrate": "tsx scripts/migrate.ts",
-    "seed:user": "tsx scripts/create-user.ts"
+    "seed:user": "tsx scripts/create-user.ts",
+    "backup": "bash scripts/backup-db.sh",
+    "restore": "bash scripts/restore-db.sh"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

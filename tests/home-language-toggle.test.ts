@@ -10,7 +10,8 @@ describe('home language toggle contract', () => {
     const client = source('components/HomeShiftLoggerClient.tsx');
     expect(page).toContain('HomeShiftLoggerClient');
     expect(client).toContain("type Language = 'en' | 'ja'");
-    expect(client).toContain("useState<Language>('en')");
+    expect(client).toContain("useState<Language>('ja')");
+    expect(client).toContain('sugi-language');
     expect(client).toContain('setLanguage');
     expect(client).toContain('Recent today');
     expect(client).toContain('今日の記録');
@@ -28,11 +29,11 @@ describe('home language toggle contract', () => {
   it('has Japanese copy for the core fast logging flow', () => {
     const logger = source('components/SearchProductLogger.tsx');
     const client = source('components/HomeShiftLoggerClient.tsx');
-    expect(logger).toContain('すぐ記録');
-    expect(logger).toContain('商品名またはショートカットで検索');
+    expect(logger).toContain('商品検索');
+    expect(logger).toContain('hibi、kuchi、fetas、pripink');
     expect(logger).toContain('商品が見つかりません');
-    expect(logger).toContain('スペルを確認するか、Adminから追加してください。');
+    expect(logger).toContain('スペルを確認するか、管理から追加してください。');
     expect(client).toContain('今日の記録はまだありません');
-    expect(client).toContain('すぐ記録または検索から始めてください。');
+    expect(client).toContain('上の商品検索から最初の記録をしてください。');
   });
 });

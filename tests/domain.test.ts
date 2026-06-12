@@ -18,7 +18,7 @@ describe('sugi domain helpers', () => {
   });
 
   it('does not allow logging zero-point products', () => {
-    expect(isLoggableProduct({ id: 1, product_name: '0pt', point_value: 0, category: 'x', scope: 'global' })).toBe(false);
-    expect(isLoggableProduct({ id: 2, product_name: '120pt', point_value: 120, category: 'x', scope: 'global' })).toBe(true);
+    expect(isLoggableProduct({ point_value: 0 })).toBe(false);
+    expect(isLoggableProduct({ point_value: 120 })).toBe(true);
   });
 });

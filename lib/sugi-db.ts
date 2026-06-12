@@ -99,7 +99,7 @@ export async function listSearchableProducts(userId: number, search = '', limit 
      WHERE p.is_active = TRUE AND (p.user_id IS NULL OR p.user_id = $1)
      GROUP BY p.id, p.product_name, p.point_value, p.category, p.user_id, p.nicknames, pv.id, pv.variant_label, pv.display_shortcut, pv.point_value, pv.nicknames, pv.unit_count
      ORDER BY sale_count DESC, p.product_name, pv.unit_count NULLS LAST, pv.id
-     LIMIT 300`,
+     LIMIT 1000`,
     [userId]
   );
   const products = applyDefaultProductAliases(rows.map((r) => rowToProduct(r))).map((product, index) => ({ ...product, sale_count: Number(rows[index]?.sale_count ?? 0) }));
@@ -179,6 +179,21 @@ export async function salesByMonth(userId: number, month: string): Promise<Month
     [userId, month]
   );
   return rows.map((r) => ({ sold_date: r.sold_date, total_points: Number(r.total_points), total_items: Number(r.total_items) }));
+}
+
+export async function listSalesHistory(userId: number, limit = 300, month?: string): Promise<DatedSale[]> {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 300, 1000));
+  const validMonth = month && /^\d{4}-\d{2}$/.test(month) ? month : null;
+  const rows = await query<DatedSale>(
+    `SELECT id, sold_date::text, product_name, quantity, points_per_item, total_points, created_at::text
+     FROM sales_logs
+     WHERE user_id = $1
+       AND ($3::text IS NULL OR (sold_date >= ($3 || '-01')::date AND sold_date < (($3 || '-01')::date + interval '1 month')))
+     ORDER BY sold_date ASC, created_at ASC, id ASC
+     LIMIT $2`,
+    [userId, safeLimit, validMonth]
+  );
+  return rows.map(normalizeSale);
 }
 
 export async function todaySummary(userId: number): Promise<{ total_points: number; total_items: number; recent: TodaySale[] }> {

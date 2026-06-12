@@ -7,7 +7,16 @@ import type { SessionUser } from './sugi-domain';
 export const SESSION_COOKIE = 'sugi_session';
 
 function sessionSecret(): string {
-  return process.env.SUGI_SESSION_SECRET || 'dev-change-this-sugi-secret';
+  const secret = process.env.SUGI_SESSION_SECRET;
+  if (!secret && process.env.NODE_ENV === 'production') {
+    throw new Error('SUGI_SESSION_SECRET is required in production');
+  }
+  return secret || 'dev-change-this-sugi-secret';
+}
+
+function secureSessionCookie(): boolean {
+  if (process.env.SUGI_COOKIE_SECURE === 'false') return false;
+  return process.env.NODE_ENV === 'production';
 }
 
 export function sessionTokenForUser(user: SessionUser): string {
@@ -40,7 +49,7 @@ export async function setSession(user: SessionUser): Promise<void> {
   jar.set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: secureSessionCookie(),
     path: '/',
     maxAge: 60 * 60 * 24 * 30,
   });

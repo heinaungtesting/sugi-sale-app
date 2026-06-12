@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 type Language = 'en' | 'ja';
+type ActivePage = 'home' | 'sales' | 'logs' | 'admin';
 
 type Props = {
   user: { displayName: string; role?: string };
@@ -12,6 +13,7 @@ type Props = {
   backHref?: string;
   language?: Language;
   onLanguageChange?: (language: Language) => void;
+  activePage?: ActivePage;
 };
 
 const copy = {
@@ -21,7 +23,8 @@ const copy = {
     categories: '← Categories',
     logout: 'Logout',
     home: 'Home',
-    calendar: 'Open calendar',
+    calendar: 'Calendar',
+    logs: 'All logs',
     admin: 'Admin',
     todayLogged: 'Today logged',
     items: 'items',
@@ -35,7 +38,8 @@ const copy = {
     categories: '← カテゴリー',
     logout: 'ログアウト',
     home: 'ホーム',
-    calendar: 'カレンダー',
+    calendar: '履歴',
+    logs: '全記録',
     admin: '管理',
     todayLogged: '今日の記録',
     items: '点',
@@ -45,9 +49,9 @@ const copy = {
   },
 } satisfies Record<Language, Record<string, string>>;
 
-export function AppHeader({ user, totalPoints, totalItems, backHref, language, onLanguageChange }: Props) {
+export function AppHeader({ user, totalPoints, totalItems, backHref, language, onLanguageChange, activePage = 'home' }: Props) {
   const router = useRouter();
-  const [localLanguage, setLocalLanguage] = useState<Language>('en');
+  const [localLanguage, setLocalLanguage] = useState<Language>('ja');
   const activeLanguage = language ?? localLanguage;
   const t = copy[activeLanguage];
 
@@ -70,28 +74,17 @@ export function AppHeader({ user, totalPoints, totalItems, backHref, language, o
         </div>
         <div className="header-actions">
           <div className="language-toggle" aria-label="Language">
-            <button
-              className={activeLanguage === 'en' ? 'active' : ''}
-              onClick={() => switchLanguage('en')}
-              type="button"
-            >
-              English
-            </button>
-            <button
-              className={activeLanguage === 'ja' ? 'active' : ''}
-              onClick={() => switchLanguage('ja')}
-              type="button"
-            >
-              日本語
-            </button>
+            <button className={activeLanguage === 'en' ? 'active' : ''} onClick={() => switchLanguage('en')} type="button">English</button>
+            <button className={activeLanguage === 'ja' ? 'active' : ''} onClick={() => switchLanguage('ja')} type="button">日本語</button>
           </div>
           <button className="logout" onClick={logout}>{t.logout}</button>
         </div>
       </div>
       <nav className="nav hero-nav" aria-label="Main navigation">
-        <a href="/" aria-current="page">{t.home}</a>
-        <a href="/sales">{t.calendar}</a>
-        {user.role === 'admin' && <a href="/admin">{t.admin}</a>}
+        <a href="/" aria-current={activePage === 'home' ? 'page' : undefined}>{t.home}</a>
+        <a href="/sales" aria-current={activePage === 'sales' ? 'page' : undefined}>{t.calendar}</a>
+        <a href="/logs" aria-current={activePage === 'logs' ? 'page' : undefined}>{t.logs}</a>
+        {user.role === 'admin' && <a href="/admin" aria-current={activePage === 'admin' ? 'page' : undefined}>{t.admin}</a>}
       </nav>
       <div className="hero-metrics" aria-label={t.summaryAria}>
         <div className="hero-metric primary"><span>{t.todayLogged}</span><strong>{totalItems}</strong><small>{t.items}</small></div>

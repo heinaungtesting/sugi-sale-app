@@ -5,45 +5,46 @@ import { describe, expect, it } from 'vitest';
 const source = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 
 describe('sales page mobile UI source', () => {
-  it('uses a compact sales-only shell instead of the heavy AppHeader stats header', () => {
+  it('uses the same AppShell and AppHeader as home', () => {
     const page = source('app/sales/page.tsx');
-    expect(page).toContain('sales-shell');
-    expect(page).not.toContain('<AppHeader');
+    expect(page).toContain('<AppShell>');
+    expect(page).toContain('<AppHeader');
+    expect(page).toContain('activePage="sales"');
+    expect(page).not.toContain('sales-shell');
   });
 
-  it('renders calendar and selected-date details as separate rounded cards', () => {
+  it('renders calendar and selected-date details as separate shared rounded cards', () => {
     const client = source('components/SalesCalendarClient.tsx');
+    expect(client).toContain('PageCard');
     expect(client).toContain('sales-calendar-card');
     expect(client).toContain('sales-detail-card');
     expect(client).toContain('selected-day-pill');
   });
 
-  it('keeps product add collapsed and makes selected-date entries scrollable', () => {
+  it('keeps selected-date entries scrollable without product-add drawer complexity', () => {
     const client = source('components/SalesCalendarClient.tsx');
     const css = source('app/globals.css');
-    expect(client).toContain('showAddProduct');
-    expect(client).toContain('+ Add product');
+    expect(client).not.toContain('showAddProduct');
+    expect(client).not.toContain('sales-add-drawer');
     expect(css).toMatch(/\.sales-log-scroll\s*{[^}]*overflow-y:\s*auto/s);
-    expect(css).toMatch(/\.sales-add-drawer\s*{[^}]*max-height/s);
+    expect(css).not.toContain('sales-add-drawer');
   });
 
-  it('adds polished day activity dots and stronger selected-date summary chips', () => {
+  it('keeps simple activity dots and one selected-date total line', () => {
     const client = source('components/SalesCalendarClient.tsx');
     const css = source('app/globals.css');
     expect(client).toContain('sales-day-dot');
-    expect(client).toContain('sales-summary-strip');
-    expect(client).toContain('summary-chip primary');
+    expect(client).toContain('selected-day-total');
+    expect(client).not.toContain('sales-summary-strip');
     expect(css).toMatch(/\.sales-day-dot\s*{/s);
-    expect(css).toMatch(/\.summary-chip\.primary\s*{/s);
+    expect(css).toMatch(/\.selected-day-total\s*{/s);
   });
 
-  it('uses polished empty/add states for fast mobile logging', () => {
+  it('uses clean Japanese empty state copy', () => {
     const client = source('components/SalesCalendarClient.tsx');
     const css = source('app/globals.css');
-    expect(client).toContain('No products logged yet');
-    expect(client).toContain('Tap a variant to log ×1');
-    expect(client).toContain('Add product');
+    expect(client).toContain('記録はありません');
+    expect(client).toContain('別の日付を選ぶか、ここから商品を追加してください。');
     expect(css).toMatch(/\.sales-empty-state\s*{/s);
-    expect(css).toMatch(/\.sales-family-card h3\s*{/s);
   });
 });

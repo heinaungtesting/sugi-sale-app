@@ -8,7 +8,7 @@ describe('sales calendar and admin build source contracts', () => {
   it('clears the undo toast after successful undo on the fast logger', () => {
     const component = source('components/SearchProductLogger.tsx');
     expect(component).toContain("setToast(null)");
-    expect(component).toContain("setLastLogged(false)");
+    expect(component).toContain("setLastLogged(null)");
   });
 
   it('supports dated sale logging and exact sale deletion by id', () => {
@@ -20,9 +20,10 @@ describe('sales calendar and admin build source contracts', () => {
     expect(existsSync(join(process.cwd(), 'app/api/sales/[id]/route.ts'))).toBe(true);
   });
 
-  it('adds calendar/history sales UI with selected-date product adding', () => {
+  it('adds calendar/history sales UI for checking selected-date logs', () => {
     expect(existsSync(join(process.cwd(), 'app/sales/page.tsx'))).toBe(true);
-    expect(source('components/SalesCalendarClient.tsx')).toContain('Add product to');
+    expect(source('components/SalesCalendarClient.tsx')).toContain('選択日');
+    expect(source('components/SalesCalendarClient.tsx')).not.toContain('Add product to');
     expect(source('app/api/sales/month/route.ts')).toContain('salesByMonth');
     expect(source('app/api/sales/date/route.ts')).toContain('salesByDate');
   });

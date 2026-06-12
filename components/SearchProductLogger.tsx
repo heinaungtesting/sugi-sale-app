@@ -1,8 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { groupProductsIntoFamilies, rankProductsForSearch, type ProductVariant, type SearchableProduct } from '@/lib/sugi-domain';
+import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/lib/sugi-domain';
 
 type Language = 'en' | 'ja';
 
@@ -14,38 +14,40 @@ type Props = {
 const copy = {
   en: {
     aria: 'Product search logger',
-    quickAria: 'Quick log favorites',
-    quickTitle: 'Quick log',
-    quickHelp: 'Most-used variants for one-tap logging.',
-    searchLabel: 'Search product',
-    searchPlaceholder: 'Search product or shortcut',
-    hint: 'Try hibi, kuchi, fetas, pripink. Tap a variant to log ×1.',
-    resultsTitle: 'Search results',
-    productsTitle: 'All products',
-    resultsHelp: 'Filtered by shortcut/name.',
-    productsHelp: 'Frequent product groups first.',
+    searchLabel: 'Product search',
+    searchPlaceholder: 'Type hibi, kuchi, fetas, pripink...',
+
+    resultsTitle: 'Results',
+    resultsHelp: 'Tap a variant to log ×1.',
+
+    mostlyUsedTitle: 'Mostly used',
+    mostlyUsedHelp: 'Your top 30 products are ready below the search bar.',
     noMatchTitle: 'No matching product',
     noMatchHelp: 'Check spelling or add it from Admin.',
+    resultCount: 'matches',
+    searching: 'Searching...',
     error: 'Could not log product',
     undo: 'Undo latest',
+    repeat: '+1 more',
     loggedSuffix: ' logged',
   },
   ja: {
     aria: '商品検索記録',
-    quickAria: 'すぐ記録のお気に入り',
-    quickTitle: 'すぐ記録',
-    quickHelp: 'よく使う商品をワンタップで記録できます。',
     searchLabel: '商品検索',
-    searchPlaceholder: '商品名またはショートカットで検索',
-    hint: 'hibi、kuchi、fetas、pripink など。バリアントをタップすると×1で記録します。',
+    searchPlaceholder: 'hibi、kuchi、fetas、pripink...',
+
     resultsTitle: '検索結果',
-    productsTitle: '全商品',
-    resultsHelp: 'ショートカット・商品名で絞り込み中。',
-    productsHelp: 'よく記録する商品を上に表示しています。',
+    resultsHelp: 'バリアントをタップすると×1で記録します。',
+
+    mostlyUsedTitle: 'よく使う商品',
+    mostlyUsedHelp: 'よく使う30件を検索バーの下に表示しています。',
     noMatchTitle: '商品が見つかりません',
-    noMatchHelp: 'スペルを確認するか、Adminから追加してください。',
+    noMatchHelp: 'スペルを確認するか、管理から追加してください。',
+    resultCount: '件',
+    searching: '検索中...',
     error: '記録できませんでした',
     undo: '直前を取り消す',
+    repeat: 'もう1個',
     loggedSuffix: 'を記録しました',
   },
 } satisfies Record<Language, Record<string, string>>;
@@ -54,30 +56,55 @@ function busyKeyFor(variant: ProductVariant) {
   return `${variant.productId}:${variant.variantId ?? 'base'}`;
 }
 
+function variantDisplayLabel(variant: ProductVariant, family: ProductFamily, language: Language) {
+  if (family.variants.length === 1 && variant.label === '標準') return language === 'ja' ? '記録' : 'Log';
+  return variant.label;
+}
+
 export function SearchProductLogger({ products, language }: Props) {
   const router = useRouter();
   const [query, setQuery] = useState('');
+  const [searchProducts, setSearchProducts] = useState<SearchableProduct[]>(products);
+  const [isSearching, setIsSearching] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [lastLogged, setLastLogged] = useState(false);
+  const [lastLogged, setLastLogged] = useState<ProductVariant | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const t = copy[language];
+  const normalizedQuery = query.trim();
+  const hasQuery = normalizedQuery.length > 0;
 
-  const baseFamilies = useMemo(() => {
-    const ranked = rankProductsForSearch(products, '', 80);
-    return groupProductsIntoFamilies(ranked, 12);
-  }, [products]);
+  useEffect(() => {
+    if (!hasQuery) {
+      setSearchProducts(products);
+      setIsSearching(false);
+      return;
+    }
 
-  const topVariants = useMemo(() => (
-    baseFamilies
-      .flatMap((family) => family.variants.slice(0, 2).map((variant) => ({ familyName: family.name, variant })))
-      .slice(0, 6)
-  ), [baseFamilies]);
+    const controller = new AbortController();
+    setIsSearching(true);
+    fetch(`/api/products?q=${encodeURIComponent(normalizedQuery)}`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('search failed'))))
+      .then((data: SearchableProduct[]) => setSearchProducts(data))
+      .catch((error) => {
+        if (error.name !== 'AbortError') setSearchProducts(products);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsSearching(false);
+      });
+
+    return () => controller.abort();
+  }, [hasQuery, normalizedQuery, products]);
 
   const families = useMemo(() => {
-    if (!query.trim()) return baseFamilies;
-    const ranked = rankProductsForSearch(products, query, 60);
+    if (!hasQuery) return [];
+    const ranked = rankProductsForSearch(searchProducts, normalizedQuery, 60);
     return groupProductsIntoFamilies(ranked, 20);
-  }, [baseFamilies, products, query]);
+  }, [hasQuery, normalizedQuery, searchProducts]);
+
+  const mostlyUsedFamilies = useMemo(() => {
+    const rankedPopular = rankProductsForSearch(products, '', 300);
+    return groupProductsIntoFamilies(rankedPopular, 30);
+  }, [products]);
 
   async function log(variant: ProductVariant) {
     if (busyId) return;
@@ -94,49 +121,27 @@ export function SearchProductLogger({ products, language }: Props) {
       return;
     }
     const data = await res.json();
-    setLastLogged(true);
-    setToast(language === 'ja' ? `${data.product_name}${t.loggedSuffix}` : `${data.product_name}${t.loggedSuffix}`);
+    setLastLogged(variant);
+    setToast(`${data.product_name}${t.loggedSuffix}`);
     router.refresh();
   }
 
   async function undo() {
     const res = await fetch('/api/sales/latest', { method: 'DELETE' });
     if (res.ok) {
-      setLastLogged(false);
+      setLastLogged(null);
       setToast(null);
       router.refresh();
     }
   }
 
+  async function repeatLatest() {
+    if (lastLogged) await log(lastLogged);
+  }
+
   return (
     <section className="search-panel shift-log-panel" aria-label={t.aria}>
-      <div className="quick-log-card" aria-label={t.quickAria}>
-        <div className="section-heading-row">
-          <div>
-            <h2>{t.quickTitle}</h2>
-            <p>{t.quickHelp}</p>
-          </div>
-        </div>
-        <div className="quick-log-strip">
-          {topVariants.map(({ familyName, variant }) => {
-            const busyKey = busyKeyFor(variant);
-            return (
-              <button
-                key={`quick:${busyKey}`}
-                className="quick-log-button"
-                onClick={() => log(variant)}
-                disabled={busyId === busyKey}
-                title={variant.productName}
-              >
-                <span>{familyName}</span>
-                <strong>{variant.label}</strong>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="search-sticky-card">
+      <div className="search-sticky-card page-card">
         <label className="search-label" htmlFor="product-search">{t.searchLabel}</label>
         <input
           id="product-search"
@@ -149,49 +154,91 @@ export function SearchProductLogger({ products, language }: Props) {
           spellCheck={false}
           inputMode="search"
         />
-        {!query.trim() && <p className="muted quick-hint">{t.hint}</p>}
-      </div>
-
-      <div className="section-heading-row product-grid-heading">
-        <div>
-          <h2>{query.trim() ? t.resultsTitle : t.productsTitle}</h2>
-          <p>{query.trim() ? t.resultsHelp : t.productsHelp}</p>
-        </div>
-      </div>
-
-      <div className="family-list search-results">
-        {families.length === 0 ? (
-          <div className="recent-empty-state no-product-state">
-            <strong>{t.noMatchTitle}</strong>
-            <span>{t.noMatchHelp}</span>
+        {hasQuery && (
+          <div className="search-helper-row">
+            <span className="result-count-pill">{isSearching ? t.searching : `${families.length}${language === 'ja' ? t.resultCount : ` ${t.resultCount}`}`}</span>
           </div>
-        ) : families.map((family) => (
-          <section key={family.name} className="family-card" aria-label={family.name}>
-            <h3>{family.name}</h3>
-            <div className="variant-grid">
-              {family.variants.map((variant) => {
-                const busyKey = busyKeyFor(variant);
-                return (
-                  <button
-                    key={busyKey}
-                    className="variant-button"
-                    onClick={() => log(variant)}
-                    disabled={busyId === busyKey}
-                    title={variant.productName}
-                  >
-                    {variant.label}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        ))}
+        )}
       </div>
+
+      {hasQuery ? (
+        <>
+          <div className="section-heading-row product-grid-heading">
+            <div>
+              <h2>{t.resultsTitle}</h2>
+              <p>{t.resultsHelp}</p>
+            </div>
+          </div>
+          <div className="family-list search-results">
+            {families.length === 0 ? (
+              <div className="recent-empty-state no-product-state">
+                <strong>{t.noMatchTitle}</strong>
+                <span>{t.noMatchHelp}</span>
+              </div>
+            ) : families.map((family) => (
+              <section key={family.name} className="family-card" aria-label={family.name}>
+                <h3>{family.name}</h3>
+                <div className="variant-grid">
+                  {family.variants.map((variant) => {
+                    const busyKey = busyKeyFor(variant);
+                    return (
+                      <button
+                        key={busyKey}
+                        className="variant-button"
+                        onClick={() => log(variant)}
+                        disabled={busyId === busyKey}
+                        title={variant.productName}
+                      >
+                        {variantDisplayLabel(variant, family, language)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="section-heading-row product-grid-heading mostly-used-heading">
+            <div>
+              <h2>{t.mostlyUsedTitle}</h2>
+              <p>{t.mostlyUsedHelp}</p>
+            </div>
+          </div>
+          <div className="family-list mostly-used-list">
+            {mostlyUsedFamilies.map((family) => (
+              <section key={family.name} className="family-card" aria-label={family.name}>
+                <h3>{family.name}</h3>
+                <div className="variant-grid">
+                  {family.variants.map((variant) => {
+                    const busyKey = busyKeyFor(variant);
+                    return (
+                      <button
+                        key={busyKey}
+                        className="variant-button"
+                        onClick={() => log(variant)}
+                        disabled={busyId === busyKey}
+                        title={variant.productName}
+                      >
+                        {variantDisplayLabel(variant, family, language)}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+            ))}
+          </div>
+        </>
+      )}
 
       {toast && (
         <div className="toast">
           <div>{toast}</div>
-          {lastLogged && <button onClick={undo}>{t.undo}</button>}
+          <div className="toast-actions">
+            {lastLogged && <button onClick={undo}>{t.undo}</button>}
+            {lastLogged && <button onClick={repeatLatest}>{t.repeat}</button>}
+          </div>
         </div>
       )}
     </section>
