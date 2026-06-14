@@ -31,8 +31,17 @@ async function main() {
     WHERE display_shortcut IS NULL OR trim(display_shortcut) = ''
   `);
 
+  await pool.query(`CREATE EXTENSION IF NOT EXISTS pg_trgm`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_products_user_category ON products(user_id, category, is_active)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_products_active_visible ON products(user_id, is_active, product_name)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_products_name_trgm ON products USING gin (product_name gin_trgm_ops)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_products_nicknames_gin ON products USING gin (nicknames)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_variants_product_active ON product_variants(product_id, unit_count) WHERE is_active = TRUE`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_variants_nicknames_gin ON product_variants USING gin (nicknames)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_variants_label_trgm ON product_variants USING gin (variant_label gin_trgm_ops)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_variants_shortcut_trgm ON product_variants USING gin (display_shortcut gin_trgm_ops)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sales_logs_user_date ON sales_logs(user_id, sold_date, created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sales_logs_user_product ON sales_logs(user_id, product_id)`);
 
   const username = process.env.SUGI_DEFAULT_USERNAME ?? 'staff1';
   const displayName = process.env.SUGI_DEFAULT_DISPLAY_NAME ?? 'Staff 1';

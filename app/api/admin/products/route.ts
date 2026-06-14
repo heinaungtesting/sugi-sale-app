@@ -1,11 +1,12 @@
 import { currentUser, requireUserResponse } from '@/lib/auth';
 import { listAdminProducts, requireAdmin, upsertProduct } from '@/lib/sugi-admin-db';
 
-export async function GET() {
+export async function GET(req: Request) {
   const user = await currentUser();
   if (!user) return requireUserResponse();
   if (!(await requireAdmin(user))) return Response.json({ error: 'forbidden' }, { status: 403 });
-  return Response.json(await listAdminProducts());
+  const url = new URL(req.url);
+  return Response.json(await listAdminProducts(url.searchParams.get('q') ?? ''));
 }
 
 export async function POST(req: Request) {

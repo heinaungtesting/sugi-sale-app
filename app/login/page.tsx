@@ -35,6 +35,7 @@ export default function LoginPage() {
       <form className="login-card" onSubmit={submit}>
         <h1>Sugi Sale Logger</h1>
         <p className="muted">Login with your pre-made user ID and PIN.</p>
+        <p className="login-legal-link"><a href="/legal">利用規約・プライバシーポリシー</a></p>
         <label className="field">
           <span>User ID</span>
           <input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoFocus />

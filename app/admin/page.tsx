@@ -13,7 +13,7 @@ export default async function AdminPage() {
   if (user.role !== 'admin') redirect('/');
   const [today, users, products] = await Promise.all([todaySummary(user.id), listAdminUsers(), listAdminProducts()]);
   return (
-    <main className="shell">
+    <main className="shell admin-shell">
       <AppHeader user={user} totalPoints={today.total_points} totalItems={today.total_items} />
       <AdminClient initialUsers={users as any} initialProducts={products as any} />
     </main>

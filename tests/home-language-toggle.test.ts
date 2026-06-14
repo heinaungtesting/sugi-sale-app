@@ -32,7 +32,8 @@ describe('home language toggle contract', () => {
     expect(logger).toContain('商品検索');
     expect(logger).toContain('hibi、kuchi、fetas、pripink');
     expect(logger).toContain('商品が見つかりません');
-    expect(logger).toContain('スペルを確認するか、管理から追加してください。');
+    expect(logger).toContain('おすすめした商品がDBにない場合、その場で点数を入れて追加できます。');
+    expect(logger).toContain('追加して記録');
     expect(client).toContain('今日の記録はまだありません');
     expect(client).toContain('上の商品検索から最初の記録をしてください。');
   });

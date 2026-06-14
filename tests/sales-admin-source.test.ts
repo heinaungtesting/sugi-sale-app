@@ -5,10 +5,12 @@ import { describe, expect, it } from 'vitest';
 const source = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 
 describe('sales calendar and admin build source contracts', () => {
-  it('clears the undo toast after successful undo on the fast logger', () => {
+  it('keeps the fast logger toast passive without undo/repeat actions', () => {
     const component = source('components/SearchProductLogger.tsx');
-    expect(component).toContain("setToast(null)");
-    expect(component).toContain("setLastLogged(null)");
+    expect(component).toContain('setToast(null)');
+    expect(component).not.toContain('loggedSuffix');
+    expect(component).not.toContain('/api/sales/latest');
+    expect(component).not.toContain('Undo latest');
   });
 
   it('supports dated sale logging and exact sale deletion by id', () => {
@@ -35,5 +37,18 @@ describe('sales calendar and admin build source contracts', () => {
     expect(source('lib/sugi-admin-db.ts')).toContain('upsertProductVariant');
     expect(source('app/api/admin/users/route.ts')).toContain('requireAdmin');
     expect(source('app/api/admin/products/route.ts')).toContain('requireAdmin');
+  });
+
+  it('ships a PC admin workspace with product search and JSON import', () => {
+    const admin = source('components/AdminClient.tsx');
+    const css = source('app/globals.css');
+    expect(admin).toContain('Search & edit');
+    expect(admin).toContain('/api/admin/products?q=');
+    expect(admin).toContain('/api/admin/import');
+    expect(admin).toContain('JSON import · PC only');
+    expect(source('lib/sugi-admin-db.ts')).toContain('importProductsFromJson');
+    expect(source('app/api/admin/import/route.ts')).toContain('requireAdmin');
+    expect(css).toContain('@media (min-width: 900px)');
+    expect(css).toContain('.admin-mobile-blocker');
   });
 });

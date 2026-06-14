@@ -76,4 +76,19 @@ describe('product family grouping for main-page variant logger', () => {
       { productId: 7, variantId: 31, label: 'gel', pointValue: 120 },
     ]);
   });
+
+  it('sorts DB display shortcuts by pharmacy tap order: normal sizes, gel, warm sizes, big warm', () => {
+    const families = groupProductsIntoFamilies([
+      { ...product(7, 'フェイタスZα ジクサス', 150), variant_id: 1, variant_label: '21枚', variant_display_shortcut: '21枚', variant_point_value: 150 },
+      { ...product(7, 'フェイタスZα ジクサス', 150), variant_id: 2, variant_label: '大温7枚', variant_display_shortcut: '大温7枚', variant_point_value: 150 },
+      { ...product(7, 'フェイタスZα ジクサス', 100), variant_id: 3, variant_label: '温14枚', variant_display_shortcut: '温14枚', variant_point_value: 100 },
+      { ...product(7, 'フェイタスZα ジクサス', 120), variant_id: 4, variant_label: 'gel', variant_display_shortcut: 'ジェル', variant_point_value: 120 },
+      { ...product(7, 'フェイタスZα ジクサス', 50), variant_id: 5, variant_label: '7枚', variant_display_shortcut: '7枚', variant_point_value: 50 },
+      { ...product(7, 'フェイタスZα ジクサス', 50), variant_id: 6, variant_label: '温7枚', variant_display_shortcut: '温7枚', variant_point_value: 50 },
+      { ...product(7, 'フェイタスZα ジクサス', 100), variant_id: 7, variant_label: '14枚', variant_display_shortcut: '14枚', variant_point_value: 100 },
+      { ...product(7, 'フェイタスZα ジクサス', 150), variant_id: 8, variant_label: '温21枚', variant_display_shortcut: '温21枚', variant_point_value: 150 },
+    ]);
+
+    expect(families[0].variants.map((variant) => variant.label)).toEqual(['7枚', '14枚', '21枚', 'ジェル', '温7枚', '温14枚', '温21枚', '大温7枚']);
+  });
 });

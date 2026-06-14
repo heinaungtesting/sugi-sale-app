@@ -8,7 +8,7 @@ This app is intended for Sugi staff use on the private Tailscale network.
 - Alternate: `http://100.111.161.73:8080`
 - Health: `http://100.111.161.73:8080/api/health`
 
-Do not expose this app to the public internet without adding login rate limiting, CSRF protection for write routes, HTTPS, and security headers.
+Do not expose this app to the public internet without adding CSRF protection for write routes, HTTPS, stricter security headers/CSP, stronger edge-backed rate limiting, and monitoring.
 
 ## Required environment
 
@@ -131,7 +131,7 @@ If database contents are wrong, restore from backup after code rollback.
 
 ## Known limitations
 
-- No login rate limiting yet.
+- Login throttling is in-memory and suitable only for small private/Tailscale use. Use reverse-proxy or Redis-backed rate limiting before public exposure.
 - No per-user audit export yet.
 - No public internet hardening yet.
 - `npm audit` currently reports a moderate `postcss` advisory through Next.js; do not run `npm audit fix --force` because it proposes a breaking downgrade path.

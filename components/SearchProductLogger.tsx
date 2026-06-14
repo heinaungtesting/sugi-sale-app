@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/lib/sugi-domain';
 
@@ -21,15 +21,16 @@ const copy = {
     resultsHelp: 'Tap a variant to log ×1.',
 
     mostlyUsedTitle: 'Mostly used',
-    mostlyUsedHelp: 'Your top 30 products are ready below the search bar.',
     noMatchTitle: 'No matching product',
-    noMatchHelp: 'Check spelling or add it from Admin.',
+    noMatchHelp: 'If this is a real recommended product, add it now with its points.',
+    quickAddTitle: 'Quick add product',
+    quickAddName: 'Product name',
+    quickAddPoints: 'Points',
+    quickAddButton: 'Create & log',
+    quickAddError: 'Could not create product',
     resultCount: 'matches',
     searching: 'Searching...',
     error: 'Could not log product',
-    undo: 'Undo latest',
-    repeat: '+1 more',
-    loggedSuffix: ' logged',
   },
   ja: {
     aria: '商品検索記録',
@@ -40,15 +41,16 @@ const copy = {
     resultsHelp: 'バリアントをタップすると×1で記録します。',
 
     mostlyUsedTitle: 'よく使う商品',
-    mostlyUsedHelp: 'よく使う30件を検索バーの下に表示しています。',
     noMatchTitle: '商品が見つかりません',
-    noMatchHelp: 'スペルを確認するか、管理から追加してください。',
+    noMatchHelp: 'おすすめした商品がDBにない場合、その場で点数を入れて追加できます。',
+    quickAddTitle: '商品をクイック追加',
+    quickAddName: '商品名',
+    quickAddPoints: '点数',
+    quickAddButton: '追加して記録',
+    quickAddError: '商品を追加できませんでした',
     resultCount: '件',
     searching: '検索中...',
     error: '記録できませんでした',
-    undo: '直前を取り消す',
-    repeat: 'もう1個',
-    loggedSuffix: 'を記録しました',
   },
 } satisfies Record<Language, Record<string, string>>;
 
@@ -67,8 +69,10 @@ export function SearchProductLogger({ products, language }: Props) {
   const [searchProducts, setSearchProducts] = useState<SearchableProduct[]>(products);
   const [isSearching, setIsSearching] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [lastLogged, setLastLogged] = useState<ProductVariant | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [quickAddName, setQuickAddName] = useState('');
+  const [quickAddPoints, setQuickAddPoints] = useState('');
+  const [isCreatingProduct, setIsCreatingProduct] = useState(false);
   const t = copy[language];
   const normalizedQuery = query.trim();
   const hasQuery = normalizedQuery.length > 0;
@@ -95,6 +99,10 @@ export function SearchProductLogger({ products, language }: Props) {
     return () => controller.abort();
   }, [hasQuery, normalizedQuery, products]);
 
+  useEffect(() => {
+    setQuickAddName(normalizedQuery);
+  }, [normalizedQuery]);
+
   const families = useMemo(() => {
     if (!hasQuery) return [];
     const ranked = rankProductsForSearch(searchProducts, normalizedQuery, 60);
@@ -120,23 +128,37 @@ export function SearchProductLogger({ products, language }: Props) {
       setToast(t.error);
       return;
     }
-    const data = await res.json();
-    setLastLogged(variant);
-    setToast(`${data.product_name}${t.loggedSuffix}`);
+    await res.json();
+    setToast(null);
     router.refresh();
   }
 
-  async function undo() {
-    const res = await fetch('/api/sales/latest', { method: 'DELETE' });
-    if (res.ok) {
-      setLastLogged(null);
-      setToast(null);
-      router.refresh();
+  async function quickCreateAndLog(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (isCreatingProduct) return;
+    const name = quickAddName.trim();
+    const points = Number(quickAddPoints);
+    if (!name || !Number.isFinite(points) || points <= 0) {
+      setToast(t.quickAddError);
+      return;
     }
-  }
-
-  async function repeatLatest() {
-    if (lastLogged) await log(lastLogged);
+    setIsCreatingProduct(true);
+    const res = await fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_name: name, point_value: points, log: true }),
+    });
+    setIsCreatingProduct(false);
+    if (!res.ok) {
+      setToast(t.quickAddError);
+      return;
+    }
+    const data = await res.json();
+    setToast(null);
+    setQuickAddPoints('');
+    setQuery(name);
+    setSearchProducts(await (await fetch(`/api/products?q=${encodeURIComponent(name)}`)).json());
+    router.refresh();
   }
 
   return (
@@ -171,9 +193,34 @@ export function SearchProductLogger({ products, language }: Props) {
           </div>
           <div className="family-list search-results">
             {families.length === 0 ? (
-              <div className="recent-empty-state no-product-state">
+              <div className="recent-empty-state no-product-state quick-add-card">
                 <strong>{t.noMatchTitle}</strong>
                 <span>{t.noMatchHelp}</span>
+                <form className="quick-add-form" onSubmit={quickCreateAndLog}>
+                  <label>
+                    {t.quickAddName}
+                    <input
+                      value={quickAddName}
+                      onChange={(event) => setQuickAddName(event.target.value)}
+                      maxLength={120}
+                      required
+                    />
+                  </label>
+                  <label>
+                    {t.quickAddPoints}
+                    <input
+                      value={quickAddPoints}
+                      onChange={(event) => setQuickAddPoints(event.target.value)}
+                      type="number"
+                      inputMode="numeric"
+                      min="1"
+                      max="9999"
+                      placeholder="120"
+                      required
+                    />
+                  </label>
+                  <button type="submit" disabled={isCreatingProduct}>{t.quickAddButton}</button>
+                </form>
               </div>
             ) : families.map((family) => (
               <section key={family.name} className="family-card" aria-label={family.name}>
@@ -203,7 +250,6 @@ export function SearchProductLogger({ products, language }: Props) {
           <div className="section-heading-row product-grid-heading mostly-used-heading">
             <div>
               <h2>{t.mostlyUsedTitle}</h2>
-              <p>{t.mostlyUsedHelp}</p>
             </div>
           </div>
           <div className="family-list mostly-used-list">
@@ -235,10 +281,6 @@ export function SearchProductLogger({ products, language }: Props) {
       {toast && (
         <div className="toast">
           <div>{toast}</div>
-          <div className="toast-actions">
-            {lastLogged && <button onClick={undo}>{t.undo}</button>}
-            {lastLogged && <button onClick={repeatLatest}>{t.repeat}</button>}
-          </div>
         </div>
       )}
     </section>

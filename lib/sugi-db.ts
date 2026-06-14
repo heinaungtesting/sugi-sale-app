@@ -70,40 +70,66 @@ function rowToProduct(r: {
   };
 }
 
+type SearchableProductRow = {
+  id: string;
+  product_name: string;
+  point_value: number;
+  category: string | null;
+  user_id: string | null;
+  sale_count: string | null;
+  nicknames: string[] | null;
+  variant_id: string | null;
+  variant_label: string | null;
+  variant_display_shortcut: string | null;
+  variant_point_value: number | null;
+  variant_nicknames: string[] | null;
+};
+
+function normalizeSearchParam(search: string): string {
+  return search.normalize('NFKC').trim().replace(/\s+/g, '').toLowerCase();
+}
+
+function hydrateSearchRows(rows: SearchableProductRow[]): SearchableProduct[] {
+  return applyDefaultProductAliases(rows.map((r) => rowToProduct(r))).map((product, index) => ({ ...product, sale_count: Number(rows[index]?.sale_count ?? 0) }));
+}
+
 export async function listSearchableProducts(userId: number, search = '', limit = 60): Promise<SearchableProduct[]> {
-  const rows = await query<{
-    id: string;
-    product_name: string;
-    point_value: number;
-    category: string | null;
-    user_id: string | null;
-    sale_count: string | null;
-    nicknames: string[] | null;
-    variant_id: string | null;
-    variant_label: string | null;
-    variant_display_shortcut: string | null;
-    variant_point_value: number | null;
-    variant_nicknames: string[] | null;
-  }>(
-    `SELECT p.id, p.product_name, p.point_value, COALESCE(NULLIF(TRIM(p.category), ''), 'その他') AS category, p.user_id,
+  const normalizedSearch = normalizeSearchParam(search);
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 60, normalizedSearch ? 200 : 1000));
+  const rows = await query<SearchableProductRow>(
+    `WITH sale_counts AS (
+       SELECT product_id, COUNT(*)::int AS sale_count
+       FROM sales_logs
+       WHERE user_id = $1
+       GROUP BY product_id
+     )
+     SELECT p.id, p.product_name, p.point_value, COALESCE(NULLIF(TRIM(p.category), ''), 'その他') AS category, p.user_id,
             p.nicknames,
             pv.id AS variant_id,
             pv.variant_label,
             pv.display_shortcut AS variant_display_shortcut,
             pv.point_value AS variant_point_value,
             pv.nicknames AS variant_nicknames,
-            COALESCE(COUNT(s.id), 0)::text AS sale_count
+            COALESCE(sc.sale_count, 0)::text AS sale_count
      FROM products p
      LEFT JOIN product_variants pv ON pv.product_id = p.id AND pv.is_active = TRUE
-     LEFT JOIN sales_logs s ON s.product_id = p.id AND s.user_id = $1
-     WHERE p.is_active = TRUE AND (p.user_id IS NULL OR p.user_id = $1)
-     GROUP BY p.id, p.product_name, p.point_value, p.category, p.user_id, p.nicknames, pv.id, pv.variant_label, pv.display_shortcut, pv.point_value, pv.nicknames, pv.unit_count
-     ORDER BY sale_count DESC, p.product_name, pv.unit_count NULLS LAST, pv.id
-     LIMIT 1000`,
-    [userId]
+     LEFT JOIN sale_counts sc ON sc.product_id = p.id
+     WHERE p.is_active = TRUE
+       AND (p.user_id IS NULL OR p.user_id = $1)
+       AND (
+         $2 = '' OR
+         regexp_replace(lower(p.product_name), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
+         EXISTS (SELECT 1 FROM unnest(COALESCE(p.nicknames, ARRAY[]::text[])) AS nick WHERE regexp_replace(lower(nick), '\\s+', '', 'g') LIKE '%' || $2 || '%') OR
+         regexp_replace(lower(COALESCE(pv.variant_label, '')), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
+         regexp_replace(lower(COALESCE(pv.display_shortcut, '')), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
+         EXISTS (SELECT 1 FROM unnest(COALESCE(pv.nicknames, ARRAY[]::text[])) AS vnick WHERE regexp_replace(lower(vnick), '\\s+', '', 'g') LIKE '%' || $2 || '%')
+       )
+     ORDER BY COALESCE(sc.sale_count, 0) DESC, p.product_name, pv.unit_count NULLS LAST, pv.id
+     LIMIT $3`,
+    [userId, normalizedSearch, normalizedSearch ? Math.max(safeLimit * 5, 100) : 1000]
   );
-  const products = applyDefaultProductAliases(rows.map((r) => rowToProduct(r))).map((product, index) => ({ ...product, sale_count: Number(rows[index]?.sale_count ?? 0) }));
-  return rankProductsForSearch(products, search, limit);
+  const products = hydrateSearchRows(rows);
+  return rankProductsForSearch(products, search, safeLimit);
 }
 
 export async function getVisibleProduct(userId: number, productId: number): Promise<Product | null> {
@@ -112,6 +138,26 @@ export async function getVisibleProduct(userId: number, productId: number): Prom
      FROM products
      WHERE id = $1 AND is_active = TRUE AND (user_id IS NULL OR user_id = $2)`,
     [productId, userId]
+  );
+  if (!row) return null;
+  return { id: Number(row.id), product_name: row.product_name, point_value: Number(row.point_value), category: categoryLabel(row.category), scope: row.user_id === null ? 'global' : 'private' };
+}
+
+export async function createQuickProduct(input: { userId: number; productName: string; pointValue: number }): Promise<Product | null> {
+  const name = input.productName.normalize('NFKC').replace(/\s+/g, ' ').trim();
+  const pointValue = Math.floor(Number(input.pointValue));
+  if (name.length < 2 || name.length > 120 || !Number.isFinite(pointValue) || pointValue <= 0 || pointValue > 9999) return null;
+  const aliases = [...new Set([name.toLowerCase(), normalizeSearchParam(name)].filter(Boolean))];
+  const row = await queryOne<{ id: string; product_name: string; point_value: number; category: string | null; user_id: string | null }>(
+    `INSERT INTO products (product_name, category, point_value, nicknames, is_active, user_id)
+     VALUES ($1, 'クイック追加', $2, $3, TRUE, NULL)
+     ON CONFLICT (product_name) DO UPDATE SET
+       point_value = EXCLUDED.point_value,
+       nicknames = (SELECT array(SELECT DISTINCT x FROM unnest(COALESCE(products.nicknames, ARRAY[]::text[]) || EXCLUDED.nicknames) x WHERE x IS NOT NULL AND trim(x) <> '')),
+       is_active = TRUE,
+       updated_at = now()
+     RETURNING id, product_name, point_value, COALESCE(NULLIF(TRIM(category), ''), 'その他') AS category, user_id`,
+    [name, pointValue, aliases]
   );
   if (!row) return null;
   return { id: Number(row.id), product_name: row.product_name, point_value: Number(row.point_value), category: categoryLabel(row.category), scope: row.user_id === null ? 'global' : 'private' };
@@ -224,6 +270,35 @@ export async function updateSaleQuantity(userId: number, saleId: number, delta: 
     `UPDATE sales_logs SET quantity = GREATEST(1, LEAST(99, quantity + $3))
      WHERE id = $1 AND user_id = $2 RETURNING id, product_name, quantity, points_per_item, total_points`,
     [saleId, userId, delta]
+  );
+  return sale ? normalizeSale(sale) : null;
+}
+
+export async function updateSalePoints(userId: number, saleId: number, pointValue: number): Promise<TodaySale | null> {
+  const points = Math.floor(Number(pointValue));
+  if (!Number.isFinite(points) || points <= 0 || points > 9999) return null;
+  const saleBefore = await queryOne<{ product_id: string; product_name: string }>(
+    `SELECT product_id, product_name FROM sales_logs WHERE id = $1 AND user_id = $2`,
+    [saleId, userId]
+  );
+  if (!saleBefore) return null;
+
+  const base = await queryOne<{ product_name: string }>(`SELECT product_name FROM products WHERE id = $1`, [saleBefore.product_id]);
+  if (base?.product_name && saleBefore.product_name !== base.product_name && saleBefore.product_name.startsWith(`${base.product_name} `)) {
+    const variantLabel = saleBefore.product_name.slice(base.product_name.length).trim();
+    await query(
+      `UPDATE product_variants SET point_value = $1, updated_at = now()
+       WHERE product_id = $2 AND variant_label = $3`,
+      [points, saleBefore.product_id, variantLabel]
+    );
+  } else {
+    await query(`UPDATE products SET point_value = $1, updated_at = now() WHERE id = $2`, [points, saleBefore.product_id]);
+  }
+
+  const sale = await queryOne<TodaySale>(
+    `UPDATE sales_logs SET points_per_item = $3
+     WHERE id = $1 AND user_id = $2 RETURNING id, product_name, quantity, points_per_item, total_points`,
+    [saleId, userId, points]
   );
   return sale ? normalizeSale(sale) : null;
 }

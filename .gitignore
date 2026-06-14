@@ -32,3 +32,11 @@ pnpm-debug.log*
 Thumbs.db
 *.tmp
 *.swp
+
+# typescript incremental build cache
+tsconfig.tsbuildinfo
+
+# local production/state artifacts
+backups/
+tailscale-acl-*.json
+

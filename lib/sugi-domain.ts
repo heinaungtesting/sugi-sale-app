@@ -160,6 +160,16 @@ function variantLabelForProduct(productName: string, familyName: string): string
   return withoutFamily || '標準';
 }
 
+function variantSortKey(label: string): number {
+  const normalized = label.normalize('NFKC').trim();
+  if (/gel|ゲル|ジェル/i.test(normalized)) return 90;
+  const number = Number(normalized.match(/\d+/)?.[0] ?? Number.NaN);
+  if (!Number.isFinite(number)) return 500;
+  if (/大.*温|温.*大/.test(normalized)) return 200 + number;
+  if (/温/.test(normalized)) return 100 + number;
+  return number;
+}
+
 export function groupProductsIntoFamilies(products: SearchableProduct[], limit?: number): ProductFamily[] {
   const families = new Map<string, ProductFamily>();
   const familiesWithDbVariants = new Set(
@@ -199,12 +209,9 @@ export function groupProductsIntoFamilies(products: SearchableProduct[], limit?:
     .map((family) => ({
       ...family,
       variants: family.variants.sort((a, b) => {
-        const aNumber = Number(a.label);
-        const bNumber = Number(b.label);
-        const aIsNumber = Number.isFinite(aNumber);
-        const bIsNumber = Number.isFinite(bNumber);
-        if (aIsNumber && bIsNumber && aNumber !== bNumber) return aNumber - bNumber;
-        if (aIsNumber !== bIsNumber) return aIsNumber ? -1 : 1;
+        const aKey = variantSortKey(a.label);
+        const bKey = variantSortKey(b.label);
+        if (aKey !== bKey) return aKey - bKey;
         return a.productId - b.productId;
       }),
     }))

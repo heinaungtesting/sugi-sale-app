@@ -26,9 +26,11 @@ fi
 TRUNCATE_SQL='TRUNCATE TABLE sales_logs, product_variants, products, sugi_users RESTART IDENTITY CASCADE;'
 
 if command -v psql >/dev/null 2>&1 && [ -n "$DB_DSN" ]; then
+  psql "$DB_DSN" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
   psql "$DB_DSN" -v ON_ERROR_STOP=1 -c "$TRUNCATE_SQL"
   psql "$DB_DSN" -v ON_ERROR_STOP=1 --file="$BACKUP_FILE"
 elif command -v docker >/dev/null 2>&1 && docker ps --format '{{.Names}}' | grep -qx "$DOCKER_CONTAINER"; then
+  docker exec -i "$DOCKER_CONTAINER" psql -U sigma_rag -d sigma_rag -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm;'
   docker exec -i "$DOCKER_CONTAINER" psql -U sigma_rag -d sigma_rag -v ON_ERROR_STOP=1 -c "$TRUNCATE_SQL"
   docker exec -i "$DOCKER_CONTAINER" psql -U sigma_rag -d sigma_rag -v ON_ERROR_STOP=1 < "$BACKUP_FILE"
 else
