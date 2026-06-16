@@ -4,6 +4,12 @@ import { applyDefaultProductAliases, categoryLabel, isLoggableProduct, rankProdu
 export type DatedSale = TodaySale & { sold_date: string; created_at?: string };
 export type MonthSaleTotal = { sold_date: string; total_points: number; total_items: number };
 
+export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+
+export function isValidIdempotencyKey(value: unknown): value is string {
+  return typeof value === 'string' && IDEMPOTENCY_KEY_PATTERN.test(value);
+}
+
 export function todaySaleDate(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
@@ -179,20 +185,64 @@ export async function getVisibleProductVariant(userId: number, productId: number
   return { id: Number(row.id), product_name: `${row.product_name} ${row.variant_label}`, point_value: Number(row.variant_point_value), category: categoryLabel(row.category), scope: row.user_id === null ? 'global' : 'private' };
 }
 
-export async function logSale(userId: number, productId: number, quantity = 1, variantId?: number | null, soldDate?: string | null) {
+export type LoggedSale = TodaySale & { today_total: number; today_items: number; idempotent_replay: boolean };
+
+export async function logSale(
+  userId: number,
+  productId: number,
+  quantity = 1,
+  variantId?: number | null,
+  soldDate?: string | null,
+  idempotencyKey?: string | null,
+): Promise<LoggedSale | null> {
   const validDate = validSaleDate(soldDate) ?? todaySaleDate();
   const product = variantId ? await getVisibleProductVariant(userId, productId, variantId) : await getVisibleProduct(userId, productId);
   if (!product || !isLoggableProduct(product)) return null;
-  const qty = Math.max(1, Math.min(Number(quantity) || 1, 99));
-  const sale = await queryOne<TodaySale>(
-    `INSERT INTO sales_logs (sold_date, user_id, product_id, product_name, quantity, points_per_item)
-     VALUES ($6::date, $1, $2, $3, $4, $5)
-     RETURNING id, product_name, quantity, points_per_item, total_points`,
-    [userId, product.id, product.product_name, qty, product.point_value, validDate]
-  );
+  const qty = quantity;
+
+  // If a key is supplied, try to claim it with an idempotent INSERT. A conflict means
+  // an earlier request from the same user already wrote this sale; replay it instead of
+  // creating a duplicate. The first request wins — payload mismatches are not allowed
+  // to mutate the original sale.
+  const key = idempotencyKey && isValidIdempotencyKey(idempotencyKey) ? idempotencyKey : null;
+  let inserted: TodaySale | null = null;
+  let replay = false;
+  if (key) {
+    inserted = await queryOne<TodaySale>(
+      `INSERT INTO sales_logs (sold_date, user_id, product_id, product_name, quantity, points_per_item, idempotency_key)
+       VALUES ($6::date, $1, $2, $3, $4, $5, $7)
+       ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+       RETURNING id, product_name, quantity, points_per_item, total_points`,
+      [userId, product.id, product.product_name, qty, product.point_value, validDate, key],
+    );
+    if (!inserted) {
+      inserted = await queryOne<TodaySale>(
+        `SELECT id, product_name, quantity, points_per_item, total_points
+         FROM sales_logs WHERE user_id = $1 AND idempotency_key = $2 LIMIT 1`,
+        [userId, key],
+      );
+      replay = true;
+    }
+  } else {
+    inserted = await queryOne<TodaySale>(
+      `INSERT INTO sales_logs (sold_date, user_id, product_id, product_name, quantity, points_per_item)
+       VALUES ($6::date, $1, $2, $3, $4, $5)
+       RETURNING id, product_name, quantity, points_per_item, total_points`,
+      [userId, product.id, product.product_name, qty, product.point_value, validDate],
+    );
+  }
+  if (!inserted) return null;
   const today = await todaySummary(userId);
-  if (!sale) return null;
-  return { id: Number(sale.id), product_name: sale.product_name, quantity: Number(sale.quantity), points_per_item: Number(sale.points_per_item), total_points: Number(sale.total_points), today_total: today.total_points, today_items: today.total_items };
+  return {
+    id: Number(inserted.id),
+    product_name: inserted.product_name,
+    quantity: Number(inserted.quantity),
+    points_per_item: Number(inserted.points_per_item),
+    total_points: Number(inserted.total_points),
+    today_total: today.total_points,
+    today_items: today.total_items,
+    idempotent_replay: replay,
+  };
 }
 
 function normalizeSale<T extends TodaySale | DatedSale>(sale: T): T {

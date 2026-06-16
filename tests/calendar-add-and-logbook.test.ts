@@ -11,8 +11,8 @@ describe('calendar add and full logbook contract', () => {
     expect(page).toContain('listSearchableProducts');
     expect(page).toContain('products={products}');
     expect(client).toContain('選択日に商品を追加');
-    expect(client).toContain('sold_date: selectedDate');
-    expect(client).toContain('/api/sales');
+    expect(client).toContain('soldDate: selectedDate');
+    expect(client).toContain('enqueueSale');
     expect(client).not.toContain('sales-add-drawer');
     expect(client).not.toContain('showAddProduct');
   });

@@ -1,14 +1,26 @@
 'use client';
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/lib/sugi-domain';
+import { enqueueSale, type QueueEntry } from '@/lib/sale-queue';
 
 type Language = 'en' | 'ja';
 
 type Props = {
   products: SearchableProduct[];
   language: Language;
+  setTodaySummary: (sale: LoggedSaleResponse, queueKey: string) => void;
+  onQuickAddCreated?: (sale: LoggedSaleResponse, queueKey: string) => void;
+};
+
+type LoggedSaleResponse = {
+  id: number;
+  product_name: string;
+  quantity: number;
+  points_per_item: number;
+  total_points: number;
+  today_total: number;
+  today_items: number;
 };
 
 const copy = {
@@ -31,6 +43,7 @@ const copy = {
     resultCount: 'matches',
     searching: 'Searching...',
     error: 'Could not log product',
+    tapAgain: 'Tap again',
   },
   ja: {
     aria: '商品検索記録',
@@ -51,8 +64,14 @@ const copy = {
     resultCount: '件',
     searching: '検索中...',
     error: '記録できませんでした',
+    tapAgain: 'もう一度タップ',
   },
 } satisfies Record<Language, Record<string, string>>;
+
+// Short debounce window for the same variant button. This is a UX guard against
+// stuck touch events firing twice — NOT a network wait. The actual write goes
+// through the offline queue and never blocks the UI.
+const TAP_DEBOUNCE_MS = 250;
 
 function busyKeyFor(variant: ProductVariant) {
   return `${variant.productId}:${variant.variantId ?? 'base'}`;
@@ -63,13 +82,28 @@ function variantDisplayLabel(variant: ProductVariant, family: ProductFamily, lan
   return variant.label;
 }
 
-export function SearchProductLogger({ products, language }: Props) {
-  const router = useRouter();
+function quickAddEnqueue(entry: QueueEntry, language: Language): { sale: LoggedSaleResponse; queueKey: string } {
+  const tempId = -entry.enqueuedAt;
+  return {
+    queueKey: entry.idempotencyKey,
+    sale: {
+      id: tempId,
+      product_name: entry.productName,
+      quantity: entry.quantity,
+      points_per_item: entry.pointValue,
+      total_points: entry.pointValue * entry.quantity,
+      today_total: 0,
+      today_items: 0,
+    },
+  };
+}
+
+export function SearchProductLogger({ products, language, setTodaySummary, onQuickAddCreated }: Props) {
   const [query, setQuery] = useState('');
   const [searchProducts, setSearchProducts] = useState<SearchableProduct[]>(products);
   const [isSearching, setIsSearching] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [recentlyTapped, setRecentlyTapped] = useState<string | null>(null);
   const [quickAddName, setQuickAddName] = useState('');
   const [quickAddPoints, setQuickAddPoints] = useState('');
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
@@ -114,23 +148,29 @@ export function SearchProductLogger({ products, language }: Props) {
     return groupProductsIntoFamilies(rankedPopular, 30);
   }, [products]);
 
-  async function log(variant: ProductVariant) {
-    if (busyId) return;
+  function log(variant: ProductVariant) {
     const busyKey = busyKeyFor(variant);
-    setBusyId(busyKey);
-    const res = await fetch('/api/sales', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ product_id: variant.productId, variant_id: variant.variantId, quantity: 1 }),
+    if (recentlyTapped === busyKey) return;
+    setRecentlyTapped(busyKey);
+    setTimeout(() => {
+      setRecentlyTapped((current) => (current === busyKey ? null : current));
+    }, TAP_DEBOUNCE_MS);
+    const entry = enqueueSale({
+      productId: variant.productId,
+      variantId: variant.variantId ?? null,
+      productName: variant.productName,
+      pointValue: variant.pointValue,
+      quantity: 1,
     });
-    setBusyId(null);
-    if (!res.ok) {
-      setToast(t.error);
-      return;
-    }
-    await res.json();
+    const { sale, queueKey } = quickAddEnqueue(entry, language);
+    setTodaySummary(sale, queueKey);
     setToast(null);
-    router.refresh();
+  }
+
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const input = event.currentTarget.querySelector<HTMLInputElement>('#product-search');
+    input?.blur();
   }
 
   async function quickCreateAndLog(event: FormEvent<HTMLFormElement>) {
@@ -143,6 +183,13 @@ export function SearchProductLogger({ products, language }: Props) {
       return;
     }
     setIsCreatingProduct(true);
+
+    // Enqueue an optimistic entry first so the tap is instant and the queue handles
+    // slow networks / retries. The /api/products call below resolves the product_id,
+    // then a follow-up fetch with the same idempotency_key replays safely if it lands
+    // out of order. For now we resolve the product id first, then enqueue — this keeps
+    // the optimistic sale data accurate and prevents a duplicate quick-add row from
+    // racing the log.
     const res = await fetch('/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -153,29 +200,42 @@ export function SearchProductLogger({ products, language }: Props) {
       setToast(t.quickAddError);
       return;
     }
-    const data = await res.json();
+    const data = await res.json() as { product?: { id: number; product_name: string; point_value: number }; sale?: LoggedSaleResponse & { idempotent_replay?: boolean } };
+    if (data.sale) {
+      // Replay path: the quick-add already logged, and we just received the canonical
+      // sale. Inject it into the recent list with a synthetic queue key so the parent
+      // knows to merge it (and so a future prune by id works).
+      onQuickAddCreated?.(data.sale, `qa-${data.sale.id}`);
+    }
     setToast(null);
     setQuickAddPoints('');
     setQuery(name);
-    setSearchProducts(await (await fetch(`/api/products?q=${encodeURIComponent(name)}`)).json());
-    router.refresh();
+    try {
+      const refreshed = await fetch(`/api/products?q=${encodeURIComponent(name)}`);
+      if (refreshed.ok) setSearchProducts(await refreshed.json());
+    } catch {
+      // ignore — best effort search refresh
+    }
   }
 
   return (
     <section className="search-panel shift-log-panel" aria-label={t.aria}>
       <div className="search-sticky-card page-card">
-        <label className="search-label" htmlFor="product-search">{t.searchLabel}</label>
-        <input
-          id="product-search"
-          className="search-input"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder={t.searchPlaceholder}
-          autoCapitalize="none"
-          autoCorrect="off"
-          spellCheck={false}
-          inputMode="search"
-        />
+        <form className="search-form" onSubmit={submitSearch}>
+          <label className="search-label" htmlFor="product-search">{t.searchLabel}</label>
+          <input
+            id="product-search"
+            className="search-input"
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder={t.searchPlaceholder}
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            inputMode="search"
+          />
+        </form>
         {hasQuery && (
           <div className="search-helper-row">
             <span className="result-count-pill">{isSearching ? t.searching : `${families.length}${language === 'ja' ? t.resultCount : ` ${t.resultCount}`}`}</span>
@@ -228,13 +288,15 @@ export function SearchProductLogger({ products, language }: Props) {
                 <div className="variant-grid">
                   {family.variants.map((variant) => {
                     const busyKey = busyKeyFor(variant);
+                    const isDebouncing = recentlyTapped === busyKey;
                     return (
                       <button
                         key={busyKey}
                         className="variant-button"
                         onClick={() => log(variant)}
-                        disabled={busyId === busyKey}
+                        disabled={isDebouncing}
                         title={variant.productName}
+                        aria-busy={isDebouncing}
                       >
                         {variantDisplayLabel(variant, family, language)}
                       </button>
@@ -259,13 +321,15 @@ export function SearchProductLogger({ products, language }: Props) {
                 <div className="variant-grid">
                   {family.variants.map((variant) => {
                     const busyKey = busyKeyFor(variant);
+                    const isDebouncing = recentlyTapped === busyKey;
                     return (
                       <button
                         key={busyKey}
                         className="variant-button"
                         onClick={() => log(variant)}
-                        disabled={busyId === busyKey}
+                        disabled={isDebouncing}
                         title={variant.productName}
+                        aria-busy={isDebouncing}
                       >
                         {variantDisplayLabel(variant, family, language)}
                       </button>

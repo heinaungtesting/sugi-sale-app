@@ -20,6 +20,10 @@ async function main() {
 
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES sugi_users(id)`);
   await pool.query(`ALTER TABLE sales_logs ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES sugi_users(id)`);
+  await pool.query(`ALTER TABLE sales_logs ADD COLUMN IF NOT EXISTS idempotency_key TEXT`);
+  // Partial unique index: enforces idempotency for keys that exist, but allows many
+  // legacy rows where the column is NULL. The client always sends a key when retrying.
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_sales_logs_user_idem ON sales_logs (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL`);
   await pool.query(`ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS display_shortcut TEXT`);
   await pool.query(`
     UPDATE product_variants

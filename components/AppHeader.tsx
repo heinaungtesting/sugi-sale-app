@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { ConnectivityIndicator } from './ConnectivityIndicator';
 
 type Language = 'en' | 'ja';
 type ActivePage = 'home' | 'sales' | 'logs' | 'admin';
@@ -55,6 +56,11 @@ export function AppHeader({ user, totalPoints, totalItems, backHref, language, o
   const activeLanguage = language ?? localLanguage;
   const t = copy[activeLanguage];
 
+  useEffect(() => {
+    document.documentElement.lang = activeLanguage;
+    document.documentElement.setAttribute('lang', activeLanguage);
+  }, [activeLanguage]);
+
   function switchLanguage(nextLanguage: Language) {
     setLocalLanguage(nextLanguage);
     onLanguageChange?.(nextLanguage);
@@ -73,6 +79,7 @@ export function AppHeader({ user, totalPoints, totalItems, backHref, language, o
           <h1>{t.title}</h1>
         </div>
         <div className="header-actions">
+          <ConnectivityIndicator language={activeLanguage} />
           <div className="language-toggle" aria-label="Language">
             <button className={activeLanguage === 'en' ? 'active' : ''} onClick={() => switchLanguage('en')} type="button">English</button>
             <button className={activeLanguage === 'ja' ? 'active' : ''} onClick={() => switchLanguage('ja')} type="button">日本語</button>

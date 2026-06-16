@@ -1,12 +1,13 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PageCard } from '@/components/PageCard';
 import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/lib/sugi-domain';
+import { enqueueSale, getSnapshot, initSaleQueue, pruneSyncedToServerIds, subscribe, type QueueSnapshot } from '@/lib/sale-queue';
 
 type MonthTotal = { sold_date: string; total_points: number; total_items: number };
-type SaleLog = { id: number; product_name: string; quantity: number; total_points: number; points_per_item: number };
+type SaleLog = { id: number; product_name: string; quantity: number; total_points: number; points_per_item: number; _queueKey?: string };
 type CalendarCell = { date: string; day: number; inMonth: boolean };
 
 type Props = {
@@ -16,6 +17,8 @@ type Props = {
   monthTotals: MonthTotal[];
   day: { total_points: number; total_items: number; logs: SaleLog[] };
 };
+
+const TAP_DEBOUNCE_MS = 250;
 
 function monthLabel(month: string) {
   const [year, m] = month.split('-').map(Number);
@@ -64,7 +67,8 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
   const [logs, setLogs] = useState(day.logs);
   const [summary, setSummary] = useState({ total_points: day.total_points, total_items: day.total_items });
   const [addQuery, setAddQuery] = useState('');
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [recentlyTapped, setRecentlyTapped] = useState<string | null>(null);
+  const [queueSnapshot, setQueueSnapshot] = useState<QueueSnapshot>(() => getSnapshot());
   const totalByDate = useMemo(() => new Map(totals.map((t) => [t.sold_date, t])), [totals]);
   const cells = useMemo(() => calendarCells(month), [month]);
   const addFamilies = useMemo(() => {
@@ -73,6 +77,55 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
     const ranked = rankProductsForSearch(products, query, 40);
     return groupProductsIntoFamilies(ranked, 8);
   }, [addQuery, products]);
+
+  useEffect(() => {
+    const dispose = initSaleQueue();
+    const unsub = subscribe((next) => setQueueSnapshot(next));
+    setQueueSnapshot(getSnapshot());
+    return () => {
+      unsub();
+      dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    // Once the server has the canonical record, drop the queue entry from the
+    // optimistic logs list.
+    const ids = new Set(logs.map((l) => Number(l.id)).filter((n) => n > 0));
+    pruneSyncedToServerIds(ids);
+  }, [logs]);
+
+  // Merge queue entries for the selected date into the displayed log list.
+  const displayedLogs = useMemo(() => {
+    const serverIds = new Set(logs.map((l) => Number(l.id)));
+    const merged: SaleLog[] = logs.map((l) => ({ ...l }));
+    for (const entry of queueSnapshot.entries) {
+      if (entry.soldDate !== selectedDate) continue;
+      if (entry.status === 'synced' && entry.sale && serverIds.has(Number(entry.sale.id))) {
+        continue;
+      }
+      if (entry.status === 'synced' && entry.sale) {
+        merged.unshift({
+          id: Number(entry.sale.id),
+          product_name: entry.sale.product_name,
+          quantity: Number(entry.sale.quantity),
+          points_per_item: Number(entry.sale.points_per_item),
+          total_points: Number(entry.sale.total_points),
+          _queueKey: entry.idempotencyKey,
+        });
+      } else if (entry.status === 'pending' || entry.status === 'sending' || entry.status === 'failed') {
+        merged.unshift({
+          id: -entry.enqueuedAt,
+          product_name: entry.productName,
+          quantity: entry.quantity,
+          points_per_item: entry.pointValue,
+          total_points: entry.pointValue * entry.quantity,
+          _queueKey: entry.idempotencyKey,
+        });
+      }
+    }
+    return merged;
+  }, [logs, queueSnapshot, selectedDate]);
 
   async function loadDate(date: string) {
     setSelectedDate(date);
@@ -103,18 +156,26 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
   }
   async function addProductToSelectedDate(variant: ProductVariant) {
     const busyKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
-    setBusyId(busyKey);
-    const res = await fetch('/api/sales', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ product_id: variant.productId, variant_id: variant.variantId, quantity: 1, sold_date: selectedDate }),
+    if (recentlyTapped === busyKey) return;
+    setRecentlyTapped(busyKey);
+    setTimeout(() => {
+      setRecentlyTapped((current) => (current === busyKey ? null : current));
+    }, TAP_DEBOUNCE_MS);
+    enqueueSale({
+      productId: variant.productId,
+      variantId: variant.variantId ?? null,
+      productName: variant.productName,
+      pointValue: variant.pointValue,
+      quantity: 1,
+      soldDate: selectedDate,
     });
-    setBusyId(null);
-    if (res.ok) {
-      setAddQuery('');
-      await refreshSelected();
-      router.refresh();
-    }
+    setAddQuery('');
+    // Pull canonical data shortly after the queue likely lands; the optimistic row
+    // gets replaced with the real one once the server response arrives via the
+    // queue snapshot subscription.
+    setTimeout(() => {
+      void refreshSelected();
+    }, 1500);
   }
   async function jumpTo(date: string) {
     await loadDate(date);
@@ -187,8 +248,9 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
                   <div className="calendar-add-variants">
                     {family.variants.map((variant) => {
                       const busyKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
+                      const isDebouncing = recentlyTapped === busyKey;
                       return (
-                        <button key={busyKey} onClick={() => addProductToSelectedDate(variant)} disabled={busyId === busyKey} title={variant.productName}>
+                        <button key={busyKey} onClick={() => addProductToSelectedDate(variant)} disabled={isDebouncing} title={variant.productName} aria-busy={isDebouncing}>
                           {variantDisplayLabel(variant, family)}
                         </button>
                       );
@@ -201,24 +263,33 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
         </div>
 
         <div className="sales-log-scroll">
-          {logs.length === 0 ? (
+          {displayedLogs.length === 0 ? (
             <div className="sales-empty-state">
               <strong>記録はありません</strong>
               <span>別の日付を選ぶか、ここから商品を追加してください。</span>
             </div>
-          ) : logs.map((log) => (
-            <article className="sales-log-card" key={log.id}>
-              <div>
-                <strong>{log.product_name}</strong>
-                <span>×{log.quantity} = {log.total_points}pt</span>
-              </div>
-              <div className="small-actions sale-controls">
-                <button aria-label={`${log.product_name}を減らす`} onClick={() => changeQty(log.id, -1)}>−</button>
-                <button aria-label={`${log.product_name}を増やす`} onClick={() => changeQty(log.id, 1)}>+</button>
-                <button className="danger-soft" onClick={() => deleteLog(log.id)}>削除</button>
-              </div>
-            </article>
-          ))}
+          ) : displayedLogs.map((log) => {
+            const className = log._queueKey ? 'sales-log-card sales-log-pending' : 'sales-log-card';
+            return (
+              <article className={className} key={`${log._queueKey ?? 'srv'}-${log.id}`}>
+                <div>
+                  <strong>{log.product_name}</strong>
+                  <span>×{log.quantity} = {log.total_points}pt</span>
+                </div>
+                <div className="small-actions sale-controls">
+                  {log._queueKey ? (
+                    <span className="muted" aria-hidden="true">↻</span>
+                  ) : (
+                    <>
+                      <button aria-label={`${log.product_name}を減らす`} onClick={() => changeQty(log.id, -1)}>−</button>
+                      <button aria-label={`${log.product_name}を増やす`} onClick={() => changeQty(log.id, 1)}>+</button>
+                      <button className="danger-soft" onClick={() => deleteLog(log.id)}>削除</button>
+                    </>
+                  )}
+                </div>
+              </article>
+            );
+          })}
         </div>
       </PageCard>
     </section>

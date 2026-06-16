@@ -1,11 +1,21 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppHeader } from '@/components/AppHeader';
 import { PageCard } from '@/components/PageCard';
 import { SearchProductLogger } from '@/components/SearchProductLogger';
 import type { SearchableProduct, TodaySale } from '@/lib/sugi-domain';
+import {
+  getSnapshot,
+  initSaleQueue,
+  pruneSyncedToServerIds,
+  removeEntry,
+  retryEntry,
+  subscribe,
+  type QueueEntry,
+  type QueueSnapshot,
+} from '@/lib/sale-queue';
 
 type Language = 'en' | 'ja';
 
@@ -17,6 +27,12 @@ type Props = {
     total_items: number;
     recent: TodaySale[];
   };
+};
+
+type RecentRow = TodaySale & {
+  _queueKey?: string;
+  _queueStatus?: 'pending' | 'sending' | 'synced' | 'failed';
+  _queueError?: string;
 };
 
 const LANGUAGE_STORAGE_KEY = 'sugi-language';
@@ -36,6 +52,10 @@ const copy = {
     savePoints: 'Save points',
     pointPlaceholder: 'points',
     pointFixError: 'Could not update points',
+    pendingBadge: '↻ syncing',
+    failedBadge: 'failed',
+    retryAria: 'Retry',
+    dismissAria: 'Dismiss',
   },
   ja: {
     recentTitle: '今日の記録',
@@ -51,24 +71,135 @@ const copy = {
     savePoints: '点数保存',
     pointPlaceholder: '点数',
     pointFixError: '点数を更新できませんでした',
+    pendingBadge: '↻ 同期中',
+    failedBadge: '失敗',
+    retryAria: '再送',
+    dismissAria: '取り消し',
   },
 } satisfies Record<Language, Record<string, string>>;
 
 export function HomeShiftLoggerClient({ user, products, today }: Props) {
   const router = useRouter();
   const [language, setLanguage] = useState<Language>('ja');
+  const [serverToday, setServerToday] = useState(today);
+  const [queueSnapshot, setQueueSnapshot] = useState<QueueSnapshot>(() => getSnapshot());
   const [pointEdits, setPointEdits] = useState<Record<number, string>>({});
   const [pointError, setPointError] = useState<string | null>(null);
   const t = copy[language];
+  const seenQueueKeys = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    const dispose = initSaleQueue();
+    const unsub = subscribe((next) => setQueueSnapshot(next));
+    setQueueSnapshot(getSnapshot());
+    return () => {
+      unsub();
+      dispose();
+    };
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY);
     if (saved === 'en' || saved === 'ja') setLanguage(saved);
   }, []);
 
+  useEffect(() => {
+    // Prune any synced queue entries that are now represented in the server's
+    // authoritative `today.recent` list. Prevents the queue from growing across
+    // navigations.
+    const ids = new Set(serverToday.recent.map((r) => Number(r.id)));
+    pruneSyncedToServerIds(ids);
+  }, [serverToday]);
+
   function changeLanguage(nextLanguage: Language) {
     setLanguage(nextLanguage);
     localStorage.setItem(LANGUAGE_STORAGE_KEY, nextLanguage);
+  }
+
+  // Build the merged recent list + display totals from the server data + queue.
+  const { recent: displayedRecent, totalPoints, totalItems } = useMemo(() => {
+    const serverIdSet = new Set(serverToday.recent.map((r) => Number(r.id)));
+    // Start with the server's recent list. Annotate any row that has a matching
+    // synced queue entry.
+    const queueByKey = new Map(queueSnapshot.entries.map((e) => [e.idempotencyKey, e]));
+    const queueBySaleId = new Map<number, QueueEntry>();
+    for (const e of queueSnapshot.entries) {
+      if (e.sale) queueBySaleId.set(Number(e.sale.id), e);
+    }
+    const rows: RecentRow[] = serverToday.recent.map((row) => {
+      const q = queueBySaleId.get(Number(row.id));
+      if (q) {
+        return { ...row, _queueKey: q.idempotencyKey, _queueStatus: q.status, _queueError: q.lastError };
+      }
+      return row;
+    });
+
+    // Append queue entries that are not yet represented in the server data.
+    // pending/sending/failed show as optimistic rows; synced show as the real sale.
+    let optimisticPoints = 0;
+    let optimisticItems = 0;
+    for (const entry of queueSnapshot.entries) {
+      const already = entry.sale ? serverIdSet.has(Number(entry.sale.id)) : false;
+      if (already) continue;
+      if (entry.status === 'synced' && entry.sale) {
+        rows.unshift({
+          id: Number(entry.sale.id),
+          product_name: entry.sale.product_name,
+          quantity: Number(entry.sale.quantity),
+          points_per_item: Number(entry.sale.points_per_item),
+          total_points: Number(entry.sale.total_points),
+          _queueKey: entry.idempotencyKey,
+          _queueStatus: 'synced',
+        });
+        // Synced entries get rolled into server totals only on the next page load.
+        // For now add the canonical points/items so the header counter is honest.
+        optimisticPoints += Number(entry.sale.total_points);
+        optimisticItems += Number(entry.sale.quantity);
+      } else if (entry.status === 'pending' || entry.status === 'sending' || entry.status === 'failed') {
+        const total = entry.pointValue * entry.quantity;
+        const tempId = -entry.enqueuedAt;
+        rows.unshift({
+          id: tempId,
+          product_name: entry.productName,
+          quantity: entry.quantity,
+          points_per_item: entry.pointValue,
+          total_points: total,
+          _queueKey: entry.idempotencyKey,
+          _queueStatus: entry.status,
+          _queueError: entry.lastError,
+        });
+        optimisticPoints += total;
+        optimisticItems += entry.quantity;
+      }
+    }
+
+    return {
+      recent: rows.slice(0, 8),
+      totalPoints: serverToday.total_points + optimisticPoints,
+      totalItems: serverToday.total_items + optimisticItems,
+    };
+  }, [serverToday, queueSnapshot]);
+
+  const setTodaySummary = useCallback((sale: TodaySale & { today_total: number; today_items: number }, queueKey: string) => {
+    if (seenQueueKeys.current.has(queueKey)) return;
+    seenQueueKeys.current.add(queueKey);
+    setServerToday((current) => ({
+      total_points: current.total_points,
+      total_items: current.total_items,
+      recent: [sale, ...current.recent.filter((item) => item.id !== sale.id)].slice(0, 8),
+    }));
+  }, []);
+
+  const onQuickAddCreated = useCallback((sale: TodaySale & { today_total: number; today_items: number }, queueKey: string) => {
+    setTodaySummary(sale, queueKey);
+  }, [setTodaySummary]);
+
+  function handleRetry(key: string) {
+    retryEntry(key);
+  }
+
+  function handleDismiss(key: string) {
+    removeEntry(key);
   }
 
   async function changeRecentQty(id: number, delta: number) {
@@ -113,13 +244,13 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
     <>
       <AppHeader
         user={user}
-        totalPoints={today.total_points}
-        totalItems={today.total_items}
+        totalPoints={totalPoints}
+        totalItems={totalItems}
         language={language}
         onLanguageChange={changeLanguage}
         activePage="home"
       />
-      <SearchProductLogger products={products} language={language} />
+      <SearchProductLogger products={products} language={language} setTodaySummary={setTodaySummary} onQuickAddCreated={onQuickAddCreated} />
       <PageCard
         title={t.recentTitle}
         description={t.recentDescription}
@@ -129,37 +260,64 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
       >
         <div className="recent-list">
           {pointError && <div className="error">{pointError}</div>}
-          {today.recent.length === 0 ? (
+          {displayedRecent.length === 0 ? (
             <div className="recent-empty-state">
               <strong>{t.emptyTitle}</strong>
               <span>{t.emptyHelp}</span>
             </div>
-          ) : today.recent.map((sale) => (
-            <div className="recent-row recent-correction-row" key={sale.id}>
-              <div>
-                <strong>{sale.product_name}</strong>
-                <span className="muted">×{sale.quantity} = {sale.total_points}pt</span>
-                <div className="point-fix-inline">
-                  <input
-                    aria-label={`${t.fixPoints} ${sale.product_name}`}
-                    type="number"
-                    inputMode="numeric"
-                    min="1"
-                    max="9999"
-                    value={pointEdits[sale.id] ?? String(sale.points_per_item)}
-                    onChange={(event) => setPointEdits((current) => ({ ...current, [sale.id]: event.target.value }))}
-                    placeholder={t.pointPlaceholder}
-                  />
-                  <button type="button" onClick={() => saveSalePoints(sale.id, sale.points_per_item)}>{t.savePoints}</button>
+          ) : displayedRecent.map((sale) => {
+            const queueStatus = sale._queueStatus;
+            const rowClass = queueStatus === 'pending' || queueStatus === 'sending'
+              ? 'recent-row recent-correction-row recent-pending'
+              : queueStatus === 'failed'
+                ? 'recent-row recent-correction-row recent-failed'
+                : 'recent-row recent-correction-row';
+            return (
+              <div className={rowClass} key={`${sale._queueKey ?? 'srv'}-${sale.id}`}>
+                <div>
+                  <strong>{sale.product_name}</strong>
+                  <span className="muted">×{sale.quantity} = {sale.total_points}pt</span>
+                  {queueStatus === 'pending' || queueStatus === 'sending' ? (
+                    <span className="queue-badge queue-badge-pending" aria-live="polite">{t.pendingBadge}</span>
+                  ) : null}
+                  {queueStatus === 'failed' ? (
+                    <span className="queue-badge queue-badge-failed" role="alert">{t.failedBadge}</span>
+                  ) : null}
+                  {!queueStatus && (
+                    <div className="point-fix-inline">
+                      <input
+                        aria-label={`${t.fixPoints} ${sale.product_name}`}
+                        type="number"
+                        inputMode="numeric"
+                        min="1"
+                        max="9999"
+                        value={pointEdits[sale.id] ?? String(sale.points_per_item)}
+                        onChange={(event) => setPointEdits((current) => ({ ...current, [sale.id]: event.target.value }))}
+                        placeholder={t.pointPlaceholder}
+                      />
+                      <button type="button" onClick={() => saveSalePoints(sale.id, sale.points_per_item)}>{t.savePoints}</button>
+                    </div>
+                  )}
+                </div>
+                <div className="recent-actions">
+                  {queueStatus === 'failed' && sale._queueKey ? (
+                    <>
+                      <button type="button" aria-label={`${t.retryAria} ${sale.product_name}`} onClick={() => handleRetry(sale._queueKey!)}>{language === 'ja' ? '再送' : 'Retry'}</button>
+                      <button type="button" className="danger-soft" aria-label={`${t.dismissAria} ${sale.product_name}`} onClick={() => handleDismiss(sale._queueKey!)}>{t.remove}</button>
+                    </>
+                  ) : !queueStatus ? (
+                    <>
+                      <button aria-label={`${t.decrease} ${sale.product_name}`} onClick={() => changeRecentQty(sale.id, -1)}>−</button>
+                      <button aria-label={`${t.increase} ${sale.product_name}`} onClick={() => changeRecentQty(sale.id, 1)}>+</button>
+                      <button className="danger-soft" onClick={() => deleteRecentSale(sale.id)}>{t.remove}</button>
+                    </>
+                  ) : (
+                    <span className="muted" aria-hidden="true">↻</span>
+                  )}
                 </div>
               </div>
-              <div className="recent-actions">
-                <button aria-label={`${t.decrease} ${sale.product_name}`} onClick={() => changeRecentQty(sale.id, -1)}>−</button>
-                <button aria-label={`${t.increase} ${sale.product_name}`} onClick={() => changeRecentQty(sale.id, 1)}>+</button>
-                <button className="danger-soft" onClick={() => deleteRecentSale(sale.id)}>{t.remove}</button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </PageCard>
     </>

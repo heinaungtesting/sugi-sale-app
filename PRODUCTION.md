@@ -135,3 +135,29 @@ If database contents are wrong, restore from backup after code rollback.
 - No per-user audit export yet.
 - No public internet hardening yet.
 - `npm audit` currently reports a moderate `postcss` advisory through Next.js; do not run `npm audit fix --force` because it proposes a breaking downgrade path.
+
+## Anti-slow-internet: offline queue + idempotency
+
+Sugi counter taps must succeed even when the store Wi-Fi drops. The app therefore pairs the server `/api/sales` route with a client-side queue and a stable per-tap idempotency key.
+
+### Server
+
+- The `sales_logs` table has an `idempotency_key TEXT` column with a partial unique index `(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL`.
+- `POST /api/sales` accepts an optional `idempotency_key` (UUID-like, 8–128 chars, `[A-Za-z0-9_-]`). The route forwards it to `logSale`.
+- `logSale` performs `INSERT ... ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING ...` and falls back to a `SELECT` to replay the original row when the key was already used. The first request wins; mismatched payloads on a duplicate key do **not** mutate the original sale.
+- The `recordSaleWrite` rate budget is charged **only on new inserts**, not on idempotent replays, so a slow network retry cannot starve legitimate new taps.
+
+### Client
+
+- `lib/sale-queue.ts` is a client-only module that owns a persistent `localStorage` queue (`sugi-sale-queue-v1`).
+- A tap is enqueued synchronously (no network wait, no busyId lock on the network) and appears instantly in the home recent list with a temp id.
+- The queue drains in the background with bounded concurrency (2 in-flight) and exponential backoff (`0 → 1.5s → 4s → 9s`, up to 4 attempts) and a 10s per-request timeout.
+- Permanent 4xx errors (other than `408` / `429`) skip retries; the entry transitions to `failed` so the user can tap to retry.
+- A 30s `/api/health` probe plus `navigator.onLine` + the `online` / `offline` window events drive the connectivity pill in the header (`オンライン` / `同期中 N件` / `オフライン`).
+- The same queue path is used by `SearchProductLogger` (home), `SalesCalendarClient` (calendar add), and `ProductTapList` (category page).
+- After a `router.refresh()` the parent prunes any `synced` queue entries whose canonical sale id is now present in the server's authoritative `today.recent`, keeping the queue bounded.
+
+### Caveats
+
+- The queue uses `localStorage`; private-mode browsers that block it will fall back to in-memory only and lose unsynced taps when the tab is closed. The pill shows an `offline` state in that case so the user knows to keep the tab open.
+- A cross-tab tap is safe: the server's `(user_id, idempotency_key)` unique index dedupes even if two tabs send the same key. The queue itself uses `BroadcastChannel` to keep the pill in sync across tabs.
