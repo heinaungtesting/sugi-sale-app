@@ -51,8 +51,8 @@ describe('home shift-speed UI contract', () => {
     expect(client).toContain('aria-hidden="true"');
     expect(client).toContain('<SearchProductLogger');
     expect(css).toContain('.nav-pet');
-    expect(css).toContain("url('/cute/v1-icon-tan-dog.webp')");
-    expect(css).toContain("url('/cute/v1-icon-gray-cat.webp')");
+    expect(css).toContain("url('/cute/v2-head-dog-excited.webp')");
+    expect(css).toContain("url('/cute/v2-head-cat-grinning.webp')");
     expect(css).toContain('.featured-family-card');
     expect(css).toContain('.cute-empty-state');
     expect(css).toContain('pointer-events: none');

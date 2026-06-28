@@ -14,7 +14,7 @@ export default async function AdminPage() {
   const [today, users, products] = await Promise.all([todaySummary(user.id), listAdminUsers(), listAdminProducts()]);
   return (
     <main className="shell admin-shell">
-      <AppHeader user={user} totalPoints={today.total_points} totalItems={today.total_items} />
+      <AppHeader user={user} totalPoints={today.total_points} totalItems={today.total_items} activePage="admin" />
       <img
         src="/cute/v2-admin-record-review.webp"
         alt=""
