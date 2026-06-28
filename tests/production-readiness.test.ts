@@ -50,7 +50,9 @@ describe('production readiness contract', () => {
     for (const path of ['scripts/backup-db.sh', 'scripts/restore-db.sh']) {
       const fullPath = join(process.cwd(), path);
       expect(existsSync(fullPath)).toBe(true);
-      expect(statSync(fullPath).mode & 0o111).toBeTruthy();
+      if (process.platform !== 'win32') {
+        expect(statSync(fullPath).mode & 0o111).toBeTruthy();
+      }
       expect(source(path)).toContain('SIGMA_RAG_PG_DSN');
     }
     expect(source('scripts/backup-db.sh')).toContain('pg_dump');

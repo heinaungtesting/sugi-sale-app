@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300..700&display=swap');
+
 * {
   box-sizing: border-box;
 }
@@ -5,9 +7,10 @@
 html, body {
   margin: 0;
   min-height: 100%;
-  background: #eef7f4;
+  background: linear-gradient(135deg, #eef7f4 0%, #e0f2fe 100%);
+  background-attachment: fixed;
   color: #10201d;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: 'Fredoka', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 button, input {
@@ -2380,4 +2383,100 @@ html, body {
   .recent-card::after { width: 48px; height: 36px; }
   .home-hero .hero-kicker::after { width: 22px; height: 22px; }
   .admin-hero-record-review { max-width: 180px; }
+}
+
+/* --- PREMIUM & CUTE UPGRADES --- */
+
+/* Keyframe Animations */
+@keyframes bobbing {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes pulsing-scale {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+@keyframes spin-rotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Mascot & Decorative Animations */
+.metric-mascot,
+.search-peek-cat,
+.admin-hero-record-review {
+  animation: bobbing 3.5s ease-in-out infinite;
+}
+
+.metric-heart {
+  animation: pulsing-scale 1.8s ease-in-out infinite;
+}
+
+.metric-sparkles {
+  animation: spin-rotate 8s linear infinite;
+}
+
+/* Glassmorphism Panels */
+.login-card,
+.page-card,
+.search-sticky-card,
+.recent-card,
+.admin-panel-card,
+.admin-card {
+  background: rgba(255, 255, 255, 0.9) !important;
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.6) !important;
+  box-shadow: 0 10px 30px rgba(15, 118, 110, 0.08) !important;
+}
+
+/* Glowing Form Inputs */
+.search-input,
+.quick-add-form input,
+.field input,
+.admin-card input,
+.admin-card select,
+.admin-card textarea {
+  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+}
+
+.search-input:focus,
+.quick-add-form input:focus,
+.field input:focus,
+.admin-card input:focus,
+.admin-card select:focus,
+.admin-card textarea:focus {
+  outline: none !important;
+  border-color: #14b8a6 !important;
+  box-shadow: 0 0 14px rgba(20, 184, 166, 0.3) !important;
+  background: #ffffff !important;
+}
+
+/* Micro-interaction Lift Effects */
+.card-button,
+.product-row,
+.recent-row,
+.variant-button,
+.family-card,
+button.logout,
+.nav a,
+.quick-add-form button {
+  transition: all 0.35s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+}
+
+.card-button:hover,
+.product-row:hover,
+.recent-row:hover,
+.family-card:hover,
+button.logout:hover,
+.nav a:hover,
+.quick-add-form button:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.01) !important;
+  box-shadow: 0 10px 24px rgba(15, 118, 110, 0.12) !important;
+}
+
+.variant-button:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.02) !important;
+  box-shadow: 0 6px 16px rgba(15, 118, 110, 0.12) !important;
 }
