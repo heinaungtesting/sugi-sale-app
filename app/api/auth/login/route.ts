@@ -1,4 +1,5 @@
 import { loginUser, setSession } from '@/lib/auth';
+import { setCsrfCookie } from '@/lib/csrf';
 
 const WINDOW_MS = 10 * 60 * 1000;
 const MAX_FAILED_ATTEMPTS = 10;
@@ -57,5 +58,6 @@ export async function POST(req: Request) {
   }
   attempts.delete(key);
   await setSession(user);
+  await setCsrfCookie();
   return Response.json({ ok: true, user });
 }

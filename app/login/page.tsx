@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { csrfFetch } from '@/lib/csrf-client';
 export default function LoginPage() {
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
@@ -13,7 +14,7 @@ export default function LoginPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await csrfFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, pin }),

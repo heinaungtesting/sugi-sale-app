@@ -1,7 +1,10 @@
 import { currentUser, requireUserResponse } from '@/lib/auth';
 import { deleteSaleById, updateSalePoints, updateSaleQuantity } from '@/lib/sugi-db';
+import { requireCsrf } from '@/lib/csrf';
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const csrf = requireCsrf(req);
+  if (csrf) return csrf;
   const user = await currentUser();
   if (!user) return requireUserResponse();
   const { id } = await params;
@@ -13,6 +16,8 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const csrf = requireCsrf(req);
+  if (csrf) return csrf;
   const user = await currentUser();
   if (!user) return requireUserResponse();
   const { id } = await params;

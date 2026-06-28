@@ -1,5 +1,6 @@
 'use client';
 
+import { csrfFetch } from './csrf-client';
 // Persistent offline-aware sale log queue.
 //
 // Goals:
@@ -187,7 +188,7 @@ async function postOnce(entry: QueueEntry): Promise<PostResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch('/api/sales', {
+    const res = await csrfFetch('/api/sales', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

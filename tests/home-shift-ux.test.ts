@@ -64,7 +64,7 @@ describe('home shift-speed UI contract', () => {
     const db = source('lib/sugi-db.ts');
     expect(logger).toContain('quick-add-form');
     expect(logger).toContain('Create & log');
-    expect(logger).toContain("fetch('/api/products'");
+    expect(logger).toContain("csrfFetch('/api/products'");
     expect(route).toContain('export async function POST');
     expect(route).toContain('createQuickProduct');
     expect(route).toContain('logSale');

@@ -1,7 +1,10 @@
 import { currentUser, requireUserResponse } from '@/lib/auth';
 import { importProductsFromJson, requireAdmin } from '@/lib/sugi-admin-db';
+import { requireCsrf } from '@/lib/csrf';
 
 export async function POST(req: Request) {
+  const csrf = requireCsrf(req);
+  if (csrf) return csrf;
   const user = await currentUser();
   if (!user) return requireUserResponse();
   if (!(await requireAdmin(user))) return Response.json({ error: 'forbidden' }, { status: 403 });

@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 
+import { csrfFetch } from '@/lib/csrf-client';
 type AdminVariant = { id: number; product_id: number; variant_label: string; display_shortcut: string | null; unit_count: number; point_value: number; nicknames: string[]; is_active: boolean };
 type AdminProduct = { id: number; product_name: string; category: string | null; point_value: number; nicknames: string[]; is_active: boolean; variants: AdminVariant[] };
 type AdminUser = { id: number; username: string; display_name: string; role: string; is_active: boolean };
@@ -50,19 +51,19 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
 
   async function saveUser(form: FormData) {
     const obj = Object.fromEntries(form);
-    await fetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...obj, is_active: obj.is_active === 'on' }) });
+    await csrfFetch('/api/admin/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...obj, is_active: obj.is_active === 'on' }) });
     await reload();
   }
 
   async function saveProduct(form: FormData) {
     const obj = Object.fromEntries(form);
-    await fetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...obj, is_active: obj.is_active === 'on' }) });
+    await csrfFetch('/api/admin/products', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...obj, is_active: obj.is_active === 'on' }) });
     await reload();
   }
 
   async function saveVariant(form: FormData) {
     const obj = Object.fromEntries(form);
-    await fetch('/api/admin/variants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...obj, is_active: obj.is_active === 'on' }) });
+    await csrfFetch('/api/admin/variants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...obj, is_active: obj.is_active === 'on' }) });
     await reload();
   }
 
@@ -85,7 +86,7 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
       }
     }
     if (updates.length === 0) return;
-    const res = await fetch('/api/admin/points', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updates }) });
+    const res = await csrfFetch('/api/admin/points', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ updates }) });
     const data = await res.json();
     setBulkResult(data.results || []);
     setBulkInput('');
@@ -102,7 +103,7 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
       setJsonError(error instanceof Error ? error.message : 'Invalid JSON');
       return;
     }
-    const res = await fetch('/api/admin/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) });
+    const res = await csrfFetch('/api/admin/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) });
     const data = await res.json();
     setJsonResult(data.results || []);
     if (!res.ok && data.error) setJsonError(data.error);

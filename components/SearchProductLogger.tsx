@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/lib/sugi-domain';
 import { enqueueSale, type QueueEntry } from '@/lib/sale-queue';
 
+import { csrfFetch } from '@/lib/csrf-client';
 type Language = 'en' | 'ja';
 
 type Props = {
@@ -190,7 +191,7 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
     // out of order. For now we resolve the product id first, then enqueue — this keeps
     // the optimistic sale data accurate and prevents a duplicate quick-add row from
     // racing the log.
-    const res = await fetch('/api/products', {
+    const res = await csrfFetch('/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ product_name: name, point_value: points, log: true }),

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ConnectivityIndicator } from './ConnectivityIndicator';
 
+import { csrfFetch } from '@/lib/csrf-client';
 const pawIcon = <span className="paw-icon" aria-hidden="true" />;
 
 type Language = 'en' | 'ja';
@@ -71,7 +72,7 @@ export function AppHeader({ user, totalPoints, totalItems, backHref, language, o
   }
 
   async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' });
+    await csrfFetch('/api/auth/logout', { method: 'POST' });
     router.replace('/login');
   }
 
