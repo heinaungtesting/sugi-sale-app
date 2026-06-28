@@ -222,19 +222,23 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
     <section className="search-panel shift-log-panel" aria-label={t.aria}>
       <div className="search-sticky-card page-card">
         <form className="search-form" onSubmit={submitSearch}>
-          <label className="search-label" htmlFor="product-search">{t.searchLabel}</label>
-          <input
-            id="product-search"
-            className="search-input"
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder={t.searchPlaceholder}
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            inputMode="search"
-          />
+          <label className="search-label" htmlFor="product-search"><span className="paw-icon" aria-hidden="true" />{t.searchLabel}</label>
+          <div className="search-input-wrap">
+            <span className="search-icon" aria-hidden="true">⌕</span>
+            <input
+              id="product-search"
+              className="search-input"
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={t.searchPlaceholder}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              inputMode="search"
+            />
+            <span className="search-peek-cat" aria-hidden="true" />
+          </div>
         </form>
         {hasQuery && (
           <div className="search-helper-row">
@@ -282,8 +286,8 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
                   <button type="submit" disabled={isCreatingProduct}>{t.quickAddButton}</button>
                 </form>
               </div>
-            ) : families.map((family) => (
-              <section key={family.name} className="family-card" aria-label={family.name}>
+            ) : families.map((family, index) => (
+              <section key={family.name} className={`family-card cute-family-card ${index < 2 ? 'featured-family-card' : ''}`.trim()} aria-label={family.name}>
                 <h3>{family.name}</h3>
                 <div className="variant-grid">
                   {family.variants.map((variant) => {
@@ -311,12 +315,12 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
         <>
           <div className="section-heading-row product-grid-heading mostly-used-heading">
             <div>
-              <h2>{t.mostlyUsedTitle}</h2>
+              <h2><span className="paw-icon" aria-hidden="true" />{t.mostlyUsedTitle}</h2>
             </div>
           </div>
           <div className="family-list mostly-used-list">
-            {mostlyUsedFamilies.map((family) => (
-              <section key={family.name} className="family-card" aria-label={family.name}>
+            {mostlyUsedFamilies.map((family, index) => (
+              <section key={family.name} className={`family-card cute-family-card ${index < 2 ? 'featured-family-card' : ''}`.trim()} aria-label={family.name}>
                 <h3>{family.name}</h3>
                 <div className="variant-grid">
                   {family.variants.map((variant) => {
@@ -343,7 +347,7 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
       )}
 
       {toast && (
-        <div className="toast">
+        <div className={`toast ${t.quickAddError === toast ? 'toast-error' : 'toast-success'}`}>
           <div>{toast}</div>
         </div>
       )}

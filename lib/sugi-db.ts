@@ -1,7 +1,7 @@
 import { query, queryOne } from './db';
-import { applyDefaultProductAliases, categoryLabel, isLoggableProduct, rankProductsForSearch, type Category, type Product, type SearchableProduct, type TodaySale } from './sugi-domain';
+import { applyDefaultProductAliases, categoryLabel, isLoggableProduct, normalizeProductCategory, rankProductsForSearch, type Category, type Product, type SearchableProduct, type TodaySale } from './sugi-domain';
 
-export type DatedSale = TodaySale & { sold_date: string; created_at?: string };
+export type DatedSale = TodaySale & { sold_date: string; category: string; created_at?: string };
 export type MonthSaleTotal = { sold_date: string; total_points: number; total_items: number };
 
 export const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
@@ -24,11 +24,11 @@ export function validSaleDate(value: string | null | undefined): string | null {
 
 export async function listCategories(userId: number): Promise<Category[]> {
   const rows = await query<{ name: string | null; count: string }>(
-    `SELECT COALESCE(NULLIF(TRIM(category), ''), 'その他') AS name, COUNT(*)::text AS count
-     FROM products
-     WHERE is_active = TRUE AND (user_id IS NULL OR user_id = $1)
-     GROUP BY COALESCE(NULLIF(TRIM(category), ''), 'その他')
-     ORDER BY name`,
+    `SELECT category AS name, COUNT(*)::text AS count
+    FROM products
+    WHERE is_active = TRUE AND (user_id IS NULL OR user_id = $1)
+    GROUP BY category
+    ORDER BY name`,
     [userId]
   );
   return rows.map((r) => ({ name: categoryLabel(r.name), count: Number(r.count) }));
@@ -37,11 +37,11 @@ export async function listCategories(userId: number): Promise<Category[]> {
 export async function listProductsByCategory(userId: number, category: string): Promise<Product[]> {
   const normalized = categoryLabel(category);
   const rows = await query<{ id: string; product_name: string; point_value: number; category: string | null; user_id: string | null }>(
-    `SELECT id, product_name, point_value, COALESCE(NULLIF(TRIM(category), ''), 'その他') AS category, user_id
-     FROM products
-     WHERE is_active = TRUE
-       AND (user_id IS NULL OR user_id = $1)
-       AND COALESCE(NULLIF(TRIM(category), ''), 'その他') = $2
+    `SELECT id, product_name, point_value, category, user_id
+    FROM products
+    WHERE is_active = TRUE
+    AND (user_id IS NULL OR user_id = $1)
+    AND category = $2
      ORDER BY product_name`,
     [userId, normalized]
   );
@@ -140,7 +140,7 @@ export async function listSearchableProducts(userId: number, search = '', limit 
 
 export async function getVisibleProduct(userId: number, productId: number): Promise<Product | null> {
   const row = await queryOne<{ id: string; product_name: string; point_value: number; category: string | null; user_id: string | null }>(
-    `SELECT id, product_name, point_value, COALESCE(NULLIF(TRIM(category), ''), 'その他') AS category, user_id
+    `SELECT id, product_name, point_value, category, user_id
      FROM products
      WHERE id = $1 AND is_active = TRUE AND (user_id IS NULL OR user_id = $2)`,
     [productId, userId]
@@ -156,13 +156,13 @@ export async function createQuickProduct(input: { userId: number; productName: s
   const aliases = [...new Set([name.toLowerCase(), normalizeSearchParam(name)].filter(Boolean))];
   const row = await queryOne<{ id: string; product_name: string; point_value: number; category: string | null; user_id: string | null }>(
     `INSERT INTO products (product_name, category, point_value, nicknames, is_active, user_id)
-     VALUES ($1, 'クイック追加', $2, $3, TRUE, NULL)
+     VALUES ($1, 'ヘルスケア', $2, $3, TRUE, NULL)
      ON CONFLICT (product_name) DO UPDATE SET
        point_value = EXCLUDED.point_value,
        nicknames = (SELECT array(SELECT DISTINCT x FROM unnest(COALESCE(products.nicknames, ARRAY[]::text[]) || EXCLUDED.nicknames) x WHERE x IS NOT NULL AND trim(x) <> '')),
        is_active = TRUE,
        updated_at = now()
-     RETURNING id, product_name, point_value, COALESCE(NULLIF(TRIM(category), ''), 'その他') AS category, user_id`,
+     RETURNING id, product_name, point_value, category, user_id`,
     [name, pointValue, aliases]
   );
   if (!row) return null;
@@ -246,7 +246,11 @@ export async function logSale(
 }
 
 function normalizeSale<T extends TodaySale | DatedSale>(sale: T): T {
-  return { ...sale, id: Number(sale.id), quantity: Number(sale.quantity), points_per_item: Number(sale.points_per_item), total_points: Number(sale.total_points) };
+ return { ...sale, id: Number(sale.id), quantity: Number(sale.quantity), points_per_item: Number(sale.points_per_item), total_points: Number(sale.total_points) };
+}
+
+function normalizeDatedSale(sale: DatedSale): DatedSale {
+ return { ...normalizeSale(sale), category: normalizeProductCategory(sale.category) };
 }
 
 export async function salesByDate(userId: number, soldDate: string): Promise<{ total_points: number; total_items: number; logs: DatedSale[] }> {
@@ -262,7 +266,7 @@ export async function salesByDate(userId: number, soldDate: string): Promise<{ t
      FROM sales_logs WHERE user_id = $1 AND sold_date = $2::date ORDER BY created_at DESC, id DESC`,
     [userId, validDate]
   );
-  return { total_points: Number(summary?.total_points ?? 0), total_items: Number(summary?.total_items ?? 0), logs: logs.map(normalizeSale) };
+  return { total_points: Number(summary?.total_points ?? 0), total_items: Number(summary?.total_items ?? 0), logs: logs.map(normalizeDatedSale) };
 }
 
 export async function salesByMonth(userId: number, month: string): Promise<MonthSaleTotal[]> {
@@ -281,16 +285,17 @@ export async function listSalesHistory(userId: number, limit = 300, month?: stri
   const safeLimit = Math.max(1, Math.min(Number(limit) || 300, 1000));
   const validMonth = month && /^\d{4}-\d{2}$/.test(month) ? month : null;
   const rows = await query<DatedSale>(
-    `SELECT id, sold_date::text, product_name, quantity, points_per_item, total_points, created_at::text
-     FROM sales_logs
-     WHERE user_id = $1
-       AND ($3::text IS NULL OR (sold_date >= ($3 || '-01')::date AND sold_date < (($3 || '-01')::date + interval '1 month')))
-     ORDER BY sold_date ASC, created_at ASC, id ASC
-     LIMIT $2`,
+    `SELECT sales_logs.id, sales_logs.sold_date::text, sales_logs.product_name, sales_logs.quantity, sales_logs.points_per_item, sales_logs.total_points, COALESCE(p.category, 'ヘルスケア') AS category, sales_logs.created_at::text
+    FROM sales_logs
+    LEFT JOIN products p ON p.id = sales_logs.product_id
+    WHERE sales_logs.user_id = $1
+    AND ($3::text IS NULL OR (sold_date >= ($3 || '-01')::date AND sold_date < (($3 || '-01')::date + interval '1 month')))
+    ORDER BY sold_date ASC, created_at ASC, id ASC
+    LIMIT $2`,
     [userId, safeLimit, validMonth]
-  );
-  return rows.map(normalizeSale);
-}
+    );
+    return rows.map(normalizeDatedSale);
+    }
 
 export async function todaySummary(userId: number): Promise<{ total_points: number; total_items: number; recent: TodaySale[] }> {
   const today = todaySaleDate();

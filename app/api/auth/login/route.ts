@@ -13,10 +13,15 @@ declare global {
 const attempts = globalThis.sugiLoginAttempts ?? new Map<string, LoginAttempt>();
 globalThis.sugiLoginAttempts = attempts;
 
-function clientKey(req: Request, username: string) {
-  const forwardedFor = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+function clientIp(req: Request) {
+  const trustedProxy = process.env.TRUSTED_PROXY === 'true';
   const realIp = req.headers.get('x-real-ip')?.trim();
-  const ip = forwardedFor || realIp || 'unknown';
+  if (trustedProxy && realIp) return realIp;
+  return 'direct-client';
+}
+
+function clientKey(req: Request, username: string) {
+  const ip = clientIp(req);
   return `${ip}:${username.trim().toLowerCase()}`;
 }
 

@@ -261,9 +261,11 @@ async function sendEntry(entry: QueueEntry): Promise<void> {
 async function drain(): Promise<void> {
   if (draining) return;
   if (!online) {
-    // Still try — fetch may succeed in some offline-ish states. But bail quickly
-    // if we are explicitly offline to avoid burning the timeout.
-    if (!healthy) return;
+    // The browser has told us it is offline. Do not attempt sale POSTs here:
+    // keep entries pending in localStorage and wait for the `online` event / health
+    // probe. This is the core counter-safety behavior — taps are recorded locally,
+    // but the app must not pretend an offline write reached the server.
+    return;
   }
   const work = entries.filter((e) => e.status === 'pending');
   if (work.length === 0) {
@@ -296,6 +298,12 @@ async function drain(): Promise<void> {
 
 async function probeHealth(): Promise<void> {
   if (!hasStorage()) return;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    online = false;
+    healthy = false;
+    emit();
+    return;
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
   try {
@@ -314,6 +322,7 @@ async function probeHealth(): Promise<void> {
 function setOnline(next: boolean): void {
   if (online === next) return;
   online = next;
+  if (!online) healthy = false;
   emit();
   if (online) scheduleDrain(0);
 }

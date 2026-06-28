@@ -110,12 +110,7 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
   }
 
   return (
-    <section className="admin-page admin-desktop-page">
-      <div className="admin-mobile-blocker page-card">
-        <h2>PC only admin</h2>
-        <p>Product editing and JSON import are intentionally desktop-only. Open this page on PC for the full admin workspace.</p>
-      </div>
-
+    <section className="admin-page">
       <div className="admin-desktop-workspace">
         <aside className="admin-sidebar page-card">
           <div>
@@ -213,8 +208,8 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
               </form>
             </div>
 
-            <div className="admin-card admin-panel-card desktop-only-tool">
-              <span className="admin-kicker">JSON import · PC only</span>
+            <div className="admin-card admin-panel-card admin-import-tool">
+              <span className="admin-kicker">JSON import</span>
               <h2>Import products</h2>
               <textarea className="admin-json-input" value={jsonInput} onChange={(event) => setJsonInput(event.target.value)} spellCheck={false} />
               {jsonError && <p className="error">{jsonError}</p>}
@@ -229,7 +224,7 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
             </div>
           </section>
 
-          <section className="admin-card admin-panel-card desktop-only-tool">
+          <section className="admin-card admin-panel-card admin-bulk-tool">
             <span className="admin-kicker">Monthly campaign</span>
             <h2>Bulk point update</h2>
             <p className="admin-help">Enter one per line or comma-separated: <code>alias 120</code>, <code>kuchi 80</code>, <code>fetasgel 120</code>. Historical sales keep their logged points.</p>

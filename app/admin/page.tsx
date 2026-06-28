@@ -15,6 +15,12 @@ export default async function AdminPage() {
   return (
     <main className="shell admin-shell">
       <AppHeader user={user} totalPoints={today.total_points} totalItems={today.total_items} />
+      <img
+        src="/cute/v2-admin-record-review.webp"
+        alt=""
+        aria-hidden="true"
+        className="admin-hero-record-review"
+      />
       <AdminClient initialUsers={users as any} initialProducts={products as any} />
     </main>
   );

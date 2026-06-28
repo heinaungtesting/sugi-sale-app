@@ -18,6 +18,16 @@ async function main() {
     )
   `);
 
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sugi_sessions (
+      jti TEXT PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES sugi_users(id) ON DELETE CASCADE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      revoked_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES sugi_users(id)`);
   await pool.query(`ALTER TABLE sales_logs ADD COLUMN IF NOT EXISTS user_id BIGINT REFERENCES sugi_users(id)`);
   await pool.query(`ALTER TABLE sales_logs ADD COLUMN IF NOT EXISTS idempotency_key TEXT`);
@@ -46,6 +56,25 @@ async function main() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_product_variants_shortcut_trgm ON product_variants USING gin (display_shortcut gin_trgm_ops)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sales_logs_user_date ON sales_logs(user_id, sold_date, created_at DESC)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sales_logs_user_product ON sales_logs(user_id, product_id)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sugi_sessions_user_active ON sugi_sessions(user_id, expires_at) WHERE revoked_at IS NULL`);
+
+  await pool.query(`
+    UPDATE products
+    SET category = CASE
+      WHEN lower(COALESCE(category, '') || ' ' || COALESCE(product_name, '')) LIKE '%化粧%'
+        OR lower(COALESCE(category, '') || ' ' || COALESCE(product_name, '')) LIKE '%cosmetic%'
+        OR lower(COALESCE(category, '') || ' ' || COALESCE(product_name, '')) LIKE '%コスメ%'
+        OR lower(COALESCE(category, '') || ' ' || COALESCE(product_name, '')) LIKE '%美容%'
+        OR lower(COALESCE(category, '') || ' ' || COALESCE(product_name, '')) LIKE '%日焼け%'
+        OR lower(COALESCE(category, '') || ' ' || COALESCE(product_name, '')) LIKE '%uv%'
+        OR lower(COALESCE(category, '') || ' ' || COALESCE(product_name, '')) LIKE '%トーンアップ%'
+        OR lower(COALESCE(category, '') || ' ' || COALESCE(product_name, '')) LIKE '%下地%'
+        OR lower(COALESCE(category, '') || ' ' || COALESCE(product_name, '')) LIKE '%美白%'
+      THEN '化粧品'
+      ELSE 'ヘルスケア'
+    END,
+    updated_at = now()
+  `);
 
   const username = process.env.SUGI_DEFAULT_USERNAME ?? 'staff1';
   const displayName = process.env.SUGI_DEFAULT_DISPLAY_NAME ?? 'Staff 1';

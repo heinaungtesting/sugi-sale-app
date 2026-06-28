@@ -38,9 +38,14 @@ describe('anti-slow-internet contract', () => {
 
     it('does not consume the rate-limit budget for idempotent replays', () => {
       const route = source('app/api/sales/route.ts');
+      // The route must reserve a rate-limit slot before logSale and refund
+      // the slot on idempotent replays. This replaces the old
+      // "recordSaleWrite conditional on !sale.idempotent_replay" pattern,
+      // which inserted the row first and could leave orphan rows in
+      // sales_logs when the limit was exceeded (see BUG-001, 2026-06-19).
       expect(route).toContain('recordSaleWrite(user.id)');
-      // The recordSaleWrite call must be conditional on !sale.idempotent_replay
-      expect(route).toMatch(/!\s*sale\.idempotent_replay/);
+      expect(route).toContain('releaseSaleWrite');
+      expect(route).toMatch(/sale\.idempotent_replay[\s\S]{0,200}releaseSaleWrite/);
     });
 
     it('forwards idempotency_key through the quick-add-and-log path', () => {
@@ -182,6 +187,16 @@ describe('anti-slow-internet contract', () => {
       expect(c).toContain("'sending'");
       expect(c).toContain("'synced'");
       expect(c).toContain("'failed'");
+    });
+
+    it('does not duplicate the just-tapped optimistic sale in 今日の記録', () => {
+      const c = source('components/HomeShiftLoggerClient.tsx');
+      // SearchProductLogger injects a temp sale immediately via setTodaySummary.
+      // The queue snapshot also contains the same temp sale. Home must filter the
+      // synthetic serverToday temp row and render the queue-owned row once.
+      expect(c).toContain('temporaryQueueIds');
+      expect(c).toContain('temporaryQueueIds.has(Number(row.id))');
+      expect(c).toMatch(/serverToday\.recent\s*\.filter/);
     });
 
     it('renders pending and failed recent rows with visual badges', () => {

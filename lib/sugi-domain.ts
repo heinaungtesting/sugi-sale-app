@@ -12,6 +12,9 @@ export type Category = {
   count: number;
 };
 
+export const PRODUCT_CATEGORIES = ['ヘルスケア', '化粧品'] as const;
+export type ProductCategory = (typeof PRODUCT_CATEGORIES)[number];
+
 export type Product = {
   id: number;
   product_name: string;
@@ -54,9 +57,26 @@ export type TodaySale = {
   total_points: number;
 };
 
-export function categoryLabel(value: string | null | undefined): string {
-  const trimmed = (value ?? '').trim();
-  return trimmed || 'その他';
+export function normalizeProductCategory(value: string | null | undefined): ProductCategory {
+ const normalized = (value ?? '').normalize('NFKC').trim().toLowerCase();
+ if (
+ normalized.includes('化粧') ||
+ normalized.includes('cosmetic') ||
+ normalized.includes('コスメ') ||
+ normalized.includes('美容') ||
+ normalized.includes('日焼け') ||
+ normalized.includes('uv') ||
+ normalized.includes('トーンアップ') ||
+ normalized.includes('下地') ||
+ normalized.includes('美白')
+ ) {
+ return '化粧品';
+ }
+ return 'ヘルスケア';
+}
+
+export function categoryLabel(value: string | null | undefined): ProductCategory {
+ return normalizeProductCategory(value);
 }
 
 export function productVisibilityWhere(userPlaceholder: string): string {
@@ -194,6 +214,12 @@ export function groupProductsIntoFamilies(products: SearchableProduct[], limit?:
     const saleCount = product.sale_count ?? 0;
     family.aliases = [...aliases];
     family.saleCount = Math.max(family.saleCount, saleCount);
+    // Dedupe variants by (productId, variantId). Defensive guard against
+    // duplicate rows arriving from upstream (e.g. self-LEFT-JOIN, search
+    // refresh races). Without this, the same variant could be pushed twice
+    // and render as duplicate cards on the home page.
+    const variantKey = `${product.id}:${product.variant_id ?? 'base'}`;
+    if (family.variants.some((v) => `${v.productId}:${v.variantId ?? 'base'}` === variantKey)) continue;
     family.variants.push({
       productId: product.id,
       variantId: product.variant_id ? Number(product.variant_id) : undefined,

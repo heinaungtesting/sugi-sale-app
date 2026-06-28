@@ -39,16 +39,31 @@ describe('sales calendar and admin build source contracts', () => {
     expect(source('app/api/admin/products/route.ts')).toContain('requireAdmin');
   });
 
-  it('ships a PC admin workspace with product search and JSON import', () => {
+  it('keeps admin and bulk-created product categories inside the two reporting buckets', () => {
+    const adminDb = source('lib/sugi-admin-db.ts');
+    const migrate = source('scripts/migrate.ts');
+    const quick = source('lib/sugi-db.ts');
+    expect(adminDb).toContain('normalizeProductCategory(input.category)');
+    expect(adminDb).toContain("category: pickString(item, ['category'], 'ヘルスケア')");
+    expect(adminDb).toContain("VALUES ($1, 'ヘルスケア', $2, $3, TRUE, NULL)");
+    expect(quick).toContain("VALUES ($1, 'ヘルスケア', $2, $3, TRUE, NULL)");
+    expect(migrate).toContain("THEN '化粧品'");
+    expect(migrate).toContain("ELSE 'ヘルスケア'");
+  });
+
+  it('ships a responsive admin workspace with product search and JSON import available on mobile', () => {
     const admin = source('components/AdminClient.tsx');
     const css = source('app/globals.css');
     expect(admin).toContain('Search & edit');
     expect(admin).toContain('/api/admin/products?q=');
     expect(admin).toContain('/api/admin/import');
-    expect(admin).toContain('JSON import · PC only');
+    expect(admin).toContain('JSON import');
+    expect(admin).not.toContain('PC only admin');
+    expect(admin).not.toContain('admin-mobile-blocker');
     expect(source('lib/sugi-admin-db.ts')).toContain('importProductsFromJson');
     expect(source('app/api/admin/import/route.ts')).toContain('requireAdmin');
     expect(css).toContain('@media (min-width: 900px)');
-    expect(css).toContain('.admin-mobile-blocker');
+    expect(css).not.toContain('.admin-desktop-workspace { display: none; }');
+    expect(css).toContain('.admin-variant-row { min-width: 720px;');
   });
 });

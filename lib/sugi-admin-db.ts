@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { query, queryOne } from './db';
+import { normalizeProductCategory } from './sugi-domain';
 
 export async function requireAdmin(user: { role: string } | null) {
   return Boolean(user && user.role === 'admin');
@@ -61,21 +62,22 @@ export async function listAdminProducts(search = '') {
 }
 
 export async function upsertProduct(input: { id?: number; product_name: string; category: string; point_value: number; nicknames: unknown; is_active: boolean }) {
-  const nicks = aliases(input.nicknames);
-  const name = input.product_name.trim();
-  if (input.id) return queryOne(`UPDATE products SET product_name=$2, category=$3, point_value=$4, nicknames=$5, is_active=$6, updated_at=now() WHERE id=$1 RETURNING id`, [input.id, name, input.category.trim() || null, input.point_value, nicks, input.is_active]);
-  return queryOne(`
-    INSERT INTO products (product_name, category, point_value, nicknames, is_active)
-    VALUES ($1,$2,$3,$4,$5)
+ const nicks = aliases(input.nicknames);
+ const name = input.product_name.trim();
+ const category = normalizeProductCategory(input.category);
+ if (input.id) return queryOne(`UPDATE products SET product_name=$2, category=$3, point_value=$4, nicknames=$5, is_active=$6, updated_at=now() WHERE id=$1 RETURNING id`, [input.id, name, category, input.point_value, nicks, input.is_active]);
+ return queryOne(`
+ INSERT INTO products (product_name, category, point_value, nicknames, is_active)
+ VALUES ($1,$2,$3,$4,$5)
     ON CONFLICT (product_name) DO UPDATE SET
       category = COALESCE(EXCLUDED.category, products.category),
       point_value = EXCLUDED.point_value,
       nicknames = (SELECT array(SELECT DISTINCT x FROM unnest(COALESCE(products.nicknames, ARRAY[]::text[]) || COALESCE(EXCLUDED.nicknames, ARRAY[]::text[])) x WHERE x IS NOT NULL AND trim(x) <> '')),
       is_active = EXCLUDED.is_active,
       updated_at = now()
-    RETURNING id
-  `, [name, input.category.trim() || null, input.point_value, nicks, input.is_active]);
-}
+      RETURNING id
+      `, [name, category, input.point_value, nicks, input.is_active]);
+      }
 
 export async function upsertProductVariant(input: { id?: number; product_id: number; variant_label: string; display_shortcut?: string; unit_count: number; point_value: number; nicknames: unknown; is_active: boolean }) {
   const nicks = aliases(input.nicknames);
@@ -122,7 +124,7 @@ export async function importProductsFromJson(payload: unknown) {
     }
     const product = await upsertProduct({
       product_name,
-      category: pickString(item, ['category'], 'ポイント商品'),
+      category: pickString(item, ['category'], 'ヘルスケア'),
       point_value: pickNumber(item, ['point_value', 'points', 'pointValue'], 0),
       nicknames: item?.nicknames ?? item?.aliases ?? [],
       is_active: item?.is_active !== false,
@@ -189,9 +191,9 @@ export async function bulkSetPoints(updates: Array<{ query: string; point_value:
     }
     // Create minimal point-only product (like SugiBot set command)
     const created = await queryOne<any>(`
-      INSERT INTO products (product_name, category, point_value, nicknames, is_active, user_id)
-      VALUES ($1, 'ポイント商品', $2, $3, TRUE, NULL)
-      RETURNING id, product_name, point_value
+    INSERT INTO products (product_name, category, point_value, nicknames, is_active, user_id)
+    VALUES ($1, 'ヘルスケア', $2, $3, TRUE, NULL)
+    RETURNING id, product_name, point_value
     `, [name, pts, [name.toLowerCase()]]);
     if (created) {
       results.push({ kind: 'created', product_name: created.product_name, point_value: pts });

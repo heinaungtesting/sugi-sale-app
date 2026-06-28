@@ -31,7 +31,7 @@ type Props = {
 
 type RecentRow = TodaySale & {
   _queueKey?: string;
-  _queueStatus?: 'pending' | 'sending' | 'synced' | 'failed';
+  _queueStatus?: 'pending' | 'sending' | 'failed';
   _queueError?: string;
 };
 
@@ -104,6 +104,10 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
   }, []);
 
   useEffect(() => {
+    setServerToday(today);
+  }, [today]);
+
+  useEffect(() => {
     // Prune any synced queue entries that are now represented in the server's
     // authoritative `today.recent` list. Prevents the queue from growing across
     // navigations.
@@ -119,20 +123,24 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
   // Build the merged recent list + display totals from the server data + queue.
   const { recent: displayedRecent, totalPoints, totalItems } = useMemo(() => {
     const serverIdSet = new Set(serverToday.recent.map((r) => Number(r.id)));
+    const temporaryQueueIds = new Set(queueSnapshot.entries.map((e) => -Number(e.enqueuedAt)));
     // Start with the server's recent list. Annotate any row that has a matching
-    // synced queue entry.
-    const queueByKey = new Map(queueSnapshot.entries.map((e) => [e.idempotencyKey, e]));
+    // synced queue entry. Filter out synthetic temp rows injected by setTodaySummary:
+    // the queue snapshot renders those same taps with their correct queue status.
     const queueBySaleId = new Map<number, QueueEntry>();
     for (const e of queueSnapshot.entries) {
       if (e.sale) queueBySaleId.set(Number(e.sale.id), e);
     }
-    const rows: RecentRow[] = serverToday.recent.map((row) => {
-      const q = queueBySaleId.get(Number(row.id));
-      if (q) {
-        return { ...row, _queueKey: q.idempotencyKey, _queueStatus: q.status, _queueError: q.lastError };
-      }
-      return row;
-    });
+    const rows: RecentRow[] = serverToday.recent
+      .filter((row) => !temporaryQueueIds.has(Number(row.id)))
+      .map((row) => {
+        const q = queueBySaleId.get(Number(row.id));
+        if (q) {
+          const queueStatus = q.status === 'pending' || q.status === 'sending' || q.status === 'failed' ? q.status : undefined;
+          return { ...row, _queueKey: q.idempotencyKey, _queueStatus: queueStatus, _queueError: q.lastError };
+        }
+        return row;
+      });
 
     // Append queue entries that are not yet represented in the server data.
     // pending/sending/failed show as optimistic rows; synced show as the real sale.
@@ -149,7 +157,7 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
           points_per_item: Number(entry.sale.points_per_item),
           total_points: Number(entry.sale.total_points),
           _queueKey: entry.idempotencyKey,
-          _queueStatus: 'synced',
+          _queueStatus: undefined,
         });
         // Synced entries get rolled into server totals only on the next page load.
         // For now add the canonical points/items so the header counter is honest.
@@ -211,13 +219,27 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
     if (res.ok) router.refresh();
   }
 
-  async function deleteRecentSale(id: number) {
+  async function deleteRecentSale(id: number, queueKey?: string) {
+    setPointError(null);
     const res = await fetch(`/api/sales/${id}`, { method: 'DELETE' });
-    if (res.ok) router.refresh();
+    if (res.ok || res.status === 404) {
+      setServerToday((current) => {
+        const removed = current.recent.find((item) => item.id === id);
+        return {
+          total_points: Math.max(0, current.total_points - Number(removed?.total_points ?? 0)),
+          total_items: Math.max(0, current.total_items - Number(removed?.quantity ?? 0)),
+          recent: current.recent.filter((item) => item.id !== id),
+        };
+      });
+      if (queueKey) removeEntry(queueKey);
+      router.refresh();
+    }
   }
 
   async function saveSalePoints(id: number, fallbackPoints: number) {
-    const nextPoints = Number(pointEdits[id] || fallbackPoints);
+    const rawPointEdit = pointEdits[id] || String(fallbackPoints);
+    const normalizedPointEdit = rawPointEdit.normalize('NFKC').trim();
+    const nextPoints = Number(normalizedPointEdit);
     if (!Number.isFinite(nextPoints) || nextPoints <= 0) {
       setPointError(t.pointFixError);
       return;
@@ -261,8 +283,11 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
         <div className="recent-list">
           {pointError && <div className="error">{pointError}</div>}
           {displayedRecent.length === 0 ? (
-            <div className="recent-empty-state">
-              <strong>{t.emptyTitle}</strong>
+            <div className="recent-empty-state cute-empty-state">
+              <span className="empty-paw empty-paw-left" aria-hidden="true" />
+              <span className="empty-paw empty-paw-right" aria-hidden="true" />
+              <strong><span className="empty-sparkle" aria-hidden="true">✦</span>{t.emptyTitle}</strong>
+              <span className="empty-divider" aria-hidden="true"><i /></span>
               <span>{t.emptyHelp}</span>
             </div>
           ) : displayedRecent.map((sale) => {
@@ -309,7 +334,7 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
                     <>
                       <button aria-label={`${t.decrease} ${sale.product_name}`} onClick={() => changeRecentQty(sale.id, -1)}>−</button>
                       <button aria-label={`${t.increase} ${sale.product_name}`} onClick={() => changeRecentQty(sale.id, 1)}>+</button>
-                      <button className="danger-soft" onClick={() => deleteRecentSale(sale.id)}>{t.remove}</button>
+                      <button className="danger-soft" onClick={() => deleteRecentSale(sale.id, sale._queueKey)}>{t.remove}</button>
                     </>
                   ) : (
                     <span className="muted" aria-hidden="true">↻</span>
