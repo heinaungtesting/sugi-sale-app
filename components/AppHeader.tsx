@@ -25,7 +25,6 @@ type Props = {
 const copy = {
   en: {
     loggedBy: 'Logged by',
-    title: 'Shift logger',
     categories: '← Categories',
     logout: 'Logout',
     home: 'Home',
@@ -40,7 +39,6 @@ const copy = {
   },
   ja: {
     loggedBy: '記録者',
-    title: 'シフト記録',
     categories: '← カテゴリー',
     logout: 'ログアウト',
     home: 'ホーム',
@@ -80,8 +78,13 @@ export function AppHeader({ user, totalPoints, totalItems, backHref, language, o
     <header className="header home-hero">
       <div className="header-row hero-top-row">
         <div>
-          {backHref ? <a className="back" href={backHref}>{t.categories}</a> : <div className="hero-kicker">{pawIcon}{t.loggedBy} {user.displayName}</div>}
-          <h1>{t.title}</h1>
+          {backHref ? (
+            <a className="back" href={backHref}>{t.categories}</a>
+          ) : (
+            <div className="hero-kicker">
+              {pawIcon}{t.loggedBy} <span className="user-name-highlight">{user.displayName}</span>
+            </div>
+          )}
         </div>
         <div className="header-actions">
           <ConnectivityIndicator language={activeLanguage} />

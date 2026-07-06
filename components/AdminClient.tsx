@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 
 import { csrfFetch } from '@/lib/csrf-client';
 type AdminVariant = { id: number; product_id: number; variant_label: string; display_shortcut: string | null; unit_count: number; point_value: number; nicknames: string[]; is_active: boolean };
 type AdminProduct = { id: number; product_name: string; category: string | null; point_value: number; nicknames: string[]; is_active: boolean; variants: AdminVariant[] };
 type AdminUser = { id: number; username: string; display_name: string; role: string; is_active: boolean };
+type AdminActivity = { id: string; created_at: string; user_id: number | null; username: string | null; display_name: string | null; action: string; summary: string; details: Record<string, unknown> };
 
 const JSON_EXAMPLE = `[
   {
@@ -19,15 +20,28 @@ const JSON_EXAMPLE = `[
   }
 ]`;
 
-export function AdminClient({ initialUsers, initialProducts }: { initialUsers: AdminUser[]; initialProducts: AdminProduct[] }) {
-  const [users, setUsers] = useState(initialUsers);
-  const [products, setProducts] = useState(initialProducts);
+type AdminFormAction = (form: FormData) => Promise<void>;
+
+function submitAdminForm(event: FormEvent<HTMLFormElement>, action: AdminFormAction) {
+ event.preventDefault();
+ const form = event.currentTarget;
+ void action(new FormData(form)).catch((error) => {
+ console.error('Admin mutation failed', error);
+ });
+}
+
+export function AdminClient({ initialUsers, initialProducts, initialActivity }: { initialUsers: AdminUser[]; initialProducts: AdminProduct[]; initialActivity: AdminActivity[] }) {
+ const [users, setUsers] = useState(initialUsers);
+ const [products, setProducts] = useState(initialProducts);
+ const [activity, setActivity] = useState(initialActivity);
+ const [activityUserFilter, setActivityUserFilter] = useState('all');
   const [selectedProductId, setSelectedProductId] = useState<number | null>(initialProducts[0]?.id ?? null);
   const [productQuery, setProductQuery] = useState('');
   const [bulkInput, setBulkInput] = useState('');
   const [bulkResult, setBulkResult] = useState<any[] | null>(null);
   const [jsonInput, setJsonInput] = useState(JSON_EXAMPLE);
   const [jsonResult, setJsonResult] = useState<any[] | null>(null);
+  const [stagedCampaign, setStagedCampaign] = useState<{ campaign_month?: string; results?: any[] } | null>(null);
   const [jsonError, setJsonError] = useState('');
 
   const selectedProduct = useMemo(
@@ -46,7 +60,14 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
   }
 
   async function searchProducts() {
-    await reload(productQuery);
+  await reload(productQuery);
+  }
+
+  async function reloadActivity(nextUserId = activityUserFilter) {
+  const params = new URLSearchParams({ limit: '80' });
+  if (nextUserId !== 'all') params.set('user_id', nextUserId);
+  const res = await fetch(`/api/admin/activity?${params.toString()}`);
+  setActivity(await res.json());
   }
 
   async function saveUser(form: FormData) {
@@ -62,9 +83,21 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
   }
 
   async function saveVariant(form: FormData) {
-    const obj = Object.fromEntries(form);
-    await csrfFetch('/api/admin/variants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...obj, is_active: obj.is_active === 'on' }) });
-    await reload();
+  const obj = Object.fromEntries(form);
+  await csrfFetch('/api/admin/variants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...obj, is_active: obj.is_active === 'on' }) });
+  await reload();
+  }
+
+  async function deleteProduct(id: number) {
+  await csrfFetch(`/api/admin/products?id=${encodeURIComponent(String(id))}`, { method: 'DELETE' });
+  await reload();
+  }
+
+  async function deleteUser(user: AdminUser) {
+  const ok = window.confirm(`Delete user ${user.display_name} (${user.username})? This cannot be undone for unused accounts.`);
+  if (!ok) return;
+  await csrfFetch(`/api/admin/users?id=${encodeURIComponent(String(user.id))}`, { method: 'DELETE' });
+  await reload();
   }
 
   async function applyBulk() {
@@ -94,20 +127,37 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
   }
 
   async function importJson() {
-    setJsonError('');
-    setJsonResult(null);
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(jsonInput);
-    } catch (error) {
-      setJsonError(error instanceof Error ? error.message : 'Invalid JSON');
-      return;
-    }
-    const res = await csrfFetch('/api/admin/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) });
-    const data = await res.json();
-    setJsonResult(data.results || []);
-    if (!res.ok && data.error) setJsonError(data.error);
-    await reload();
+  setJsonError('');
+  setJsonResult(null);
+  let parsed: unknown;
+  try {
+  parsed = JSON.parse(jsonInput);
+  } catch (error) {
+  setJsonError(error instanceof Error ? error.message : 'Invalid JSON');
+  return;
+  }
+  const res = await csrfFetch('/api/admin/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) });
+  const data = await res.json();
+  setJsonResult(data.results || []);
+  if (!res.ok && data.error) setJsonError(data.error);
+  await reload();
+  }
+
+  async function stageNextMonthJson() {
+  setJsonError('');
+  setStagedCampaign(null);
+  let parsed: unknown;
+  try {
+  parsed = JSON.parse(jsonInput);
+  } catch (error) {
+  setJsonError(error instanceof Error ? error.message : 'Invalid JSON');
+  return;
+  }
+  const res = await csrfFetch('/api/admin/point-campaigns/next-month', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed) });
+  const data = await res.json();
+  setStagedCampaign({ campaign_month: data.campaign_month, results: data.results || [] });
+  if (!res.ok && data.error) setJsonError(data.error);
+  await reload();
   }
 
   return (
@@ -153,7 +203,7 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
             </div>
             {selectedProduct && (
               <>
-                <form action={saveProduct} className="admin-product-form admin-wide-grid">
+                <form key={`product-editor-${selectedProduct.id}-${selectedProduct.product_name}`} onSubmit={(event) => submitAdminForm(event, saveProduct)} className="admin-product-form admin-wide-grid">
                   <input type="hidden" name="id" value={selectedProduct.id} />
                   <label>Product name<input name="product_name" defaultValue={selectedProduct.product_name} /></label>
                   <label>Category<input name="category" defaultValue={selectedProduct.category ?? ''} /></label>
@@ -161,14 +211,15 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
                   <label className="span-2">Aliases<input name="nicknames" defaultValue={(selectedProduct.nicknames ?? []).join(', ')} /></label>
                   <label className="admin-checkbox"><input type="checkbox" name="is_active" defaultChecked={selectedProduct.is_active} /> active</label>
                   <button className="primary">Save product</button>
-                </form>
+                  <button type="button" className="danger-button" onClick={() => deleteProduct(selectedProduct.id)}>Delete product</button>
+                  </form>
 
                 <div className="admin-variant-table" role="table" aria-label="Product variants">
                   <div className="admin-variant-head" role="row">
                     <span>Label</span><span>Shortcut</span><span>Unit</span><span>Points</span><span>Aliases</span><span>Active</span><span></span>
                   </div>
                   {selectedProduct.variants.map((variant) => (
-                    <form key={variant.id} action={saveVariant} className="admin-variant-row" role="row">
+                    <form key={`variant-editor-${variant.id}-${variant.variant_label}`} onSubmit={(event) => submitAdminForm(event, saveVariant)} className="admin-variant-row" role="row">
                       <input type="hidden" name="id" value={variant.id} />
                       <input type="hidden" name="product_id" value={selectedProduct.id} />
                       <input name="variant_label" defaultValue={variant.variant_label} />
@@ -180,7 +231,7 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
                       <button>Save</button>
                     </form>
                   ))}
-                  <form action={saveVariant} className="admin-variant-row new-variant-row">
+                  <form onSubmit={(event) => submitAdminForm(event, saveVariant)} className="admin-variant-row new-variant-row">
                     <input type="hidden" name="product_id" value={selectedProduct.id} />
                     <input name="variant_label" placeholder="温7枚" />
                     <input name="display_shortcut" placeholder="温7枚" />
@@ -199,7 +250,7 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
             <div className="admin-card admin-panel-card">
               <span className="admin-kicker">Create</span>
               <h2>Add product</h2>
-              <form action={saveProduct} className="admin-wide-grid">
+              <form onSubmit={(event) => submitAdminForm(event, saveProduct)} className="admin-wide-grid">
                 <label>Product name<input name="product_name" placeholder="Product family / base product" required /></label>
                 <label>Category<input name="category" placeholder="category" /></label>
                 <label>Fallback points<input name="point_value" type="number" defaultValue="0" /></label>
@@ -215,6 +266,16 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
               <textarea className="admin-json-input" value={jsonInput} onChange={(event) => setJsonInput(event.target.value)} spellCheck={false} />
               {jsonError && <p className="error">{jsonError}</p>}
               <button type="button" onClick={importJson} className="primary">Import JSON</button>
+              <p className="admin-help">Next-month staging: current points expire at Tokyo month change; the staged JSON becomes active automatically on the first app use next month.</p>
+              <button type="button" onClick={stageNextMonthJson} className="primary">Stage for next month</button>
+              {stagedCampaign && (
+              <div className="admin-result-box">
+              <div>✅ {stagedCampaign.campaign_month} campaign staged. Current points expire after this month.</div>
+              {(stagedCampaign.results ?? []).map((result, index) => (
+              <div key={index}>{result.kind === 'error' ? '⚠️' : '✅'} {result.product_name || result.error} {result.variants ? `(${result.variants.length} variants)` : result.point_value !== undefined ? `→ ${result.point_value}pt` : ''}</div>
+              ))}
+              </div>
+              )}
               {jsonResult && (
                 <div className="admin-result-box">
                   {jsonResult.map((result, index) => (
@@ -240,10 +301,48 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
             )}
           </section>
 
+          <section className="admin-card admin-panel-card admin-activity-panel">
+            <div className="admin-section-header">
+              <div>
+                <span className="admin-kicker">Activity</span>
+                <h2>User activity</h2>
+              </div>
+              <div className="admin-activity-controls">
+                <select
+                  className="activity-user-filter"
+                  value={activityUserFilter}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setActivityUserFilter(value);
+                    void reloadActivity(value);
+                  }}
+                  aria-label="Filter activity by user"
+                >
+                  <option value="all">All users</option>
+                  {users.map((user) => (
+                    <option key={user.id} value={user.id}>{user.display_name} ({user.username})</option>
+                  ))}
+                </select>
+                <button type="button" onClick={() => reloadActivity()}>Refresh</button>
+              </div>
+            </div>
+            <div className="admin-activity-list" aria-label="User activity feed">
+              {activity.length === 0 && <p className="admin-help">No activity yet.</p>}
+              {activity.map((item) => (
+                <article key={item.id} className="admin-activity-row">
+                  <time dateTime={item.created_at}>{new Date(item.created_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}</time>
+                  <strong>{item.display_name || item.username || 'Unknown user'}</strong>
+                  <span className="admin-activity-action">{item.action}</span>
+                  <span>{item.summary}</span>
+                </article>
+              ))}
+            </div>
+          </section>
+
           <section className="admin-card admin-panel-card">
             <span className="admin-kicker">Users</span>
             <h2>Staff accounts</h2>
-            <form action={saveUser} className="admin-user-create">
+            <form onSubmit={(event) => submitAdminForm(event, saveUser)} className="admin-user-create">
               <input name="username" placeholder="username" required />
               <input name="display_name" placeholder="display name" required />
               <input name="pin" placeholder="PIN" required />
@@ -252,7 +351,7 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
             </form>
             <div className="admin-user-list">
               {users.map((user) => (
-                <form key={user.id} action={saveUser} className="admin-user-row">
+                <form key={user.id} onSubmit={(event) => submitAdminForm(event, saveUser)} className="admin-user-row">
                   <input type="hidden" name="id" value={user.id} />
                   <input name="username" defaultValue={user.username} />
                   <input name="display_name" defaultValue={user.display_name} />
@@ -260,7 +359,8 @@ export function AdminClient({ initialUsers, initialProducts }: { initialUsers: A
                   <select name="role" defaultValue={user.role}><option value="user">user</option><option value="admin">admin</option></select>
                   <label><input type="checkbox" name="is_active" defaultChecked={user.is_active} /> active</label>
                   <button>Save</button>
-                </form>
+                  <button type="button" className="danger-button" onClick={() => deleteUser(user)}>Delete user</button>
+                  </form>
               ))}
             </div>
           </section>

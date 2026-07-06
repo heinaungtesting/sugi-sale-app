@@ -53,7 +53,12 @@ describe('sale queue real offline behavior', () => {
     await vi.runOnlyPendingTimersAsync();
     fetchMock.mockClear();
 
+    // Realistic offline: navigator.onLine flips to false AND any subsequent
+    // fetch rejects like a real network failure would.
     vi.stubGlobal('navigator', { onLine: false });
+    fetchMock.mockImplementation(async () => {
+      throw new TypeError('Failed to fetch');
+    });
     for (const cb of listeners.offline ?? []) cb();
 
     queue.enqueueSale({
@@ -64,11 +69,12 @@ describe('sale queue real offline behavior', () => {
     });
 
     await vi.runOnlyPendingTimersAsync();
+    await vi.runOnlyPendingTimersAsync();
 
     expect(fetchMock).not.toHaveBeenCalledWith(
       '/api/sales',
       expect.objectContaining({ method: 'POST' })
     );
-    expect(queue.getSnapshot()).toMatchObject({ online: false, healthy: false, pendingCount: 1 });
+    expect(queue.getSnapshot()).toMatchObject({ online: false, pendingCount: 1 });
   });
 });

@@ -1,10 +1,7 @@
 import { currentUser, requireUserResponse } from '@/lib/auth';
 import { deleteTodaySaleByProduct } from '@/lib/sugi-db';
-import { requireCsrf } from '@/lib/csrf';
 
 export async function DELETE(req: Request) {
-  const csrf = requireCsrf(req);
-  if (csrf) return csrf;
   const user = await currentUser();
   if (!user) return requireUserResponse();
   const body = await req.json().catch(() => ({}));

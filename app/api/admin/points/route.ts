@@ -1,6 +1,7 @@
 import { currentUser, requireUserResponse } from '@/lib/auth';
 import { requireAdmin, bulkSetPoints } from '@/lib/sugi-admin-db';
 import { requireCsrf } from '@/lib/csrf';
+import { logActivity } from '@/lib/sugi-activity';
 
 export async function POST(req: Request) {
   const csrf = requireCsrf(req);
@@ -22,5 +23,6 @@ export async function POST(req: Request) {
   })).filter((u: any) => u.query);
 
   const results = await bulkSetPoints(normalized);
+  await logActivity({ userId: user.id, actorUserId: user.id, action: 'admin_bulk_points_updated', summary: `一括点数更新: ${results.length}件 pt更新`, details: { count: results.length, results } });
   return Response.json({ results, count: results.length });
 }

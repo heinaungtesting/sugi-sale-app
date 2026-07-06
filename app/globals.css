@@ -409,6 +409,8 @@ button, input {
 .admin-help { color: #64736f; font-size: 13px; font-weight: 750; margin: 0; }
 .admin-search-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
 .admin-search-row button, .admin-variant-row button, .admin-user-row button, .admin-product-list button { border: 0; border-radius: 10px; padding: 10px; background: #d9f4ee; color: #0f766e; font-weight: 900; }
+.admin-card button.danger-button { background: #fee2e2; color: #b91c1c; }
+.admin-card button.danger-button:hover { background: #fecaca; }
 .admin-product-list { display: grid; gap: 8px; max-height: 60vh; overflow-y: auto; padding-right: 2px; }
 .admin-product-list button { text-align: left; background: #f8fffc; border: 1px solid #d2e8e2; }
 .admin-product-list button.selected { background: #0f766e; color: white; border-color: #0f766e; }
@@ -428,7 +430,13 @@ button, input {
 .admin-tools-grid { display: grid; grid-template-columns: 1fr; gap: 14px; }
 .admin-json-input, .admin-bulk-input { min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.45; }
 .admin-result-box { display: grid; gap: 5px; border: 1px solid #d2e8e2; border-radius: 12px; background: #f8fffc; padding: 10px; font-size: 13px; font-weight: 800; }
-.admin-user-create, .admin-user-row { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; align-items: center; }
+.admin-activity-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.admin-activity-controls select { min-width: 210px; }
+.admin-activity-list { display: grid; gap: 8px; max-height: 420px; overflow-y: auto; padding-right: 2px; }
+.admin-activity-row { display: grid; grid-template-columns: 150px minmax(110px,.8fr) 130px 1fr; gap: 8px; align-items: center; border: 1px solid #e2eee9; border-radius: 12px; background: #fbfffe; padding: 9px 10px; font-size: 13px; }
+.admin-activity-row time { color: #64736f; font-weight: 800; }
+.admin-activity-action { color: #0f766e; font-weight: 950; }
+.admin-user-create, .admin-user-row { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; align-items: center; }
 .admin-user-list { display: grid; gap: 8px; }
 
 @media (min-width: 480px) {
@@ -447,6 +455,7 @@ button, input {
  .admin-desktop-workspace { grid-template-columns: 1fr; }
  .admin-product-list { max-height: 34vh; }
  .admin-wide-grid, .admin-user-create, .admin-user-row { grid-template-columns: 1fr; }
+ .admin-activity-row { grid-template-columns: 1fr; }
  .admin-section-header { display: grid; }
 }
 
@@ -2529,7 +2538,21 @@ button:disabled { cursor: not-allowed; }
 }
 .hero-top-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: start; }
 .hero-kicker { color: var(--text-choco-soft); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
-.home-hero h1 { margin: 5px 0 0; color: var(--text-choco); font-size: clamp(25px, 7.4vw, 34px); font-weight: 800; line-height: 1.08; letter-spacing: -.045em; text-wrap: balance; }
+.user-name-highlight {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid rgba(240,188,101,.38);
+  border-radius: 999px;
+  color: var(--text-choco);
+  background: linear-gradient(135deg, #fffdf7 0%, var(--honey-soft) 100%);
+  box-shadow: 0 5px 14px rgba(101,70,47,.10);
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: .01em;
+  text-transform: none;
+}
 .header-actions { max-width: 188px; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; }
 .connectivity-pill, .language-toggle, .logout { min-height: 34px; border-color: rgba(101,70,47,.14) !important; background: rgba(255,253,247,.72) !important; color: var(--text-choco) !important; box-shadow: 0 3px 9px rgba(101,70,47,.07); }
 .language-toggle button { min-height: 28px; padding: 5px 8px; color: var(--text-choco-soft); font-size: 11px; font-weight: 800; }
@@ -2652,4 +2675,171 @@ button:active { transform: scale(.97); }
 @media (max-width: 360px) {
   .nav.hero-nav a { font-size: 10px; padding-inline: 2px; }
   .family-list, .family-list.mostly-used-list, .family-list.search-results { grid-template-columns: 1fr; }
+}
+
+
+/* ============================================================== */
+/* Full cute asset coverage pass: every shipped image is visible somewhere */
+/* ============================================================== */
+.nav-pet,
+.logout-pup,
+.metric-mascot,
+.search-peek-cat,
+.login-card::after,
+.login-card h1::before,
+.sales-empty-state::before,
+.recent-empty-state::before,
+.no-product-state::before,
+.recent-card::after,
+.home-hero .hero-kicker::after,
+.recent-card .section-heading-row h2::before,
+.category-total-panel::before,
+.sales-calendar-card::before,
+.sales-detail-card::before,
+.full-log-card::before,
+.admin-panel-card::before,
+.admin-card::before,
+.toast::before {
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  background-size: contain !important;
+  pointer-events: none !important;
+}
+
+/* Tabs: replace the duplicated/no-icon look with distinct image assets. */
+.nav-pet.dog { background-image: url('/cute/v2-head-dog-excited.webp') !important; }
+.nav-pet.cat.gray { background-image: url('/cute/v2-head-cat-grinning.webp') !important; }
+.nav-pet.gold { background-image: url('/cute/v2-head-cat-fish.webp') !important; }
+.nav-pet.cat.orange { background-image: url('/cute/v2-head-cat-winking.webp') !important; }
+.logout-pup { background-image: url('/cute/v2-head-dog-eating.webp') !important; }
+.nav.hero-nav a span.nav-pet,
+.logout-pup {
+  border: 0 !important;
+  box-shadow: none !important;
+  background-color: transparent !important;
+}
+.nav.hero-nav a span.nav-pet { width: 32px; height: 32px; }
+.logout-pup { width: 22px; height: 22px; }
+
+/* Header/stat/search mascots. */
+.metric-mascot.dog { background-image: url('/cute/v2-head-dog-excited.webp') !important; }
+.metric-mascot.cat { background-image: url('/cute/v2-head-cat-dizzy.webp') !important; }
+.search-peek-cat { background-image: url('/cute/v2-playtime-yarn-cat.webp') !important; }
+.home-hero .hero-kicker::after {
+  background-image: url('/cute/v2-admin-approved.webp') !important;
+  display: inline-block;
+}
+
+/* Login gets real art again after the prior cleanup block removed it. */
+.login-card {
+  position: relative;
+  overflow: visible !important;
+}
+.login-card h1::before {
+  content: '' !important;
+  display: inline-block !important;
+  width: 34px;
+  height: 34px;
+  margin-right: 8px;
+  vertical-align: -8px;
+  background-image: url('/cute/v2-head-dog-excited.webp') !important;
+}
+.login-card::after {
+  content: '' !important;
+  position: absolute;
+  right: 6px;
+  bottom: 58px;
+  width: 74px;
+  height: 74px;
+  background-image: url('/cute/v2-head-cat-pensive.webp') !important;
+  opacity: .88;
+  z-index: 0;
+}
+.login-card > * { position: relative; z-index: 1; }
+
+/* Empty states and helper surfaces use the remaining cute assets instead of text dots. */
+.sales-empty-state::before,
+.recent-empty-state::before,
+.no-product-state::before {
+  content: '' !important;
+  width: 72px !important;
+  height: 56px !important;
+  max-width: none !important;
+  margin: 0 auto 8px !important;
+  color: transparent !important;
+  opacity: .92 !important;
+}
+.sales-empty-state::before { background-image: url('/cute/v2-head-cat-drinking.webp') !important; }
+.recent-empty-state::before { background-image: url('/cute/v2-admin-record-review.webp') !important; }
+.no-product-state::before { background-image: url('/cute/v2-head-cat-crying.webp') !important; }
+.recent-card .section-heading-row h2::before {
+  content: '' !important;
+  display: inline-block !important;
+  width: 25px !important;
+  height: 25px !important;
+  margin-right: 6px;
+  vertical-align: -6px;
+  background-image: url('/cute/v2-accessories.webp') !important;
+}
+.recent-card { position: relative; overflow: hidden; }
+.recent-card::after {
+  content: '' !important;
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  width: 54px;
+  height: 42px;
+  background-image: url('/cute/v2-accessories.webp') !important;
+  opacity: .35;
+}
+
+/* Small contextual stickers across calendar/log/admin so no page feels iconless. */
+.sales-calendar-card,
+.sales-detail-card,
+.full-log-card,
+.category-total-panel,
+.admin-card,
+.admin-panel-card { position: relative; overflow: hidden; }
+.sales-calendar-card::before,
+.sales-detail-card::before,
+.full-log-card::before,
+.category-total-panel::before,
+.admin-card::before,
+.admin-panel-card::before {
+  content: '';
+  position: absolute;
+  right: 12px;
+  top: 10px;
+  width: 42px;
+  height: 42px;
+  opacity: .18;
+  z-index: 0;
+}
+.sales-calendar-card::before { background-image: url('/cute/v2-head-cat-highfive.webp') !important; }
+.sales-detail-card::before { background-image: url('/cute/v2-head-cat-drinking.webp') !important; }
+.full-log-card::before { background-image: url('/cute/v2-head-cat-pensive.webp') !important; }
+.category-total-panel::before { background-image: url('/cute/v2-head-cat-fish.webp') !important; }
+.admin-card::before { background-image: url('/cute/v2-head-cat-highfive.webp') !important; }
+.admin-panel-card::before { background-image: url('/cute/v2-admin-approved.webp') !important; }
+.sales-calendar-card > *,
+.sales-detail-card > *,
+.full-log-card > *,
+.category-total-panel > *,
+.admin-card > *,
+.admin-panel-card > * { position: relative; z-index: 1; }
+
+/* Toasts: success/fail remain image-backed. */
+.toast::before { background-image: url('/cute/v2-head-dog-excited.webp') !important; }
+.toast.toast-error::before,
+.toast.is-error::before { background-image: url('/cute/v2-head-dog-grumpy.webp') !important; }
+
+@media (max-width: 420px) {
+  .nav.hero-nav a span.nav-pet { width: 29px; height: 29px; }
+  .login-card::after { width: 58px; height: 58px; bottom: 66px; right: 4px; opacity: .78; }
+  .sales-calendar-card::before,
+  .sales-detail-card::before,
+  .full-log-card::before,
+  .category-total-panel::before,
+  .admin-card::before,
+  .admin-panel-card::before { width: 34px; height: 34px; opacity: .14; }
 }

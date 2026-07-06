@@ -39,6 +39,28 @@ describe('sales calendar and admin build source contracts', () => {
     expect(source('app/api/admin/products/route.ts')).toContain('requireAdmin');
   });
 
+  it('adds admin delete buttons for products and users with CSRF-protected delete APIs', () => {
+    const admin = source('components/AdminClient.tsx');
+    const adminDb = source('lib/sugi-admin-db.ts');
+    const productsRoute = source('app/api/admin/products/route.ts');
+    const usersRoute = source('app/api/admin/users/route.ts');
+
+    expect(admin).toContain('deleteProduct(selectedProduct.id)');
+    expect(admin).toContain('Delete product');
+    expect(admin).toContain('deleteUser(user)');
+    expect(admin).toContain('Delete user');
+    expect(admin).toContain('window.confirm');
+    expect(admin).toContain('/api/admin/products');
+    expect(admin).toContain('/api/admin/users');
+
+    expect(adminDb).toContain('deleteProductForAdmin');
+    expect(adminDb).toContain('deleteSugiUserForAdmin');
+    expect(productsRoute).toContain('export async function DELETE');
+    expect(productsRoute).toContain('requireCsrf(req)');
+    expect(usersRoute).toContain('export async function DELETE');
+    expect(usersRoute).toContain('requireCsrf(req)');
+  });
+
   it('keeps admin and bulk-created product categories inside the two reporting buckets', () => {
     const adminDb = source('lib/sugi-admin-db.ts');
     const migrate = source('scripts/migrate.ts');
@@ -49,6 +71,20 @@ describe('sales calendar and admin build source contracts', () => {
     expect(quick).toContain("VALUES ($1, 'ヘルスケア', $2, $3, TRUE, NULL)");
     expect(migrate).toContain("THEN '化粧品'");
     expect(migrate).toContain("ELSE 'ヘルスケア'");
+  });
+
+  it('remounts admin edit forms after product and variant names change so saved names appear immediately', () => {
+    const admin = source('components/AdminClient.tsx');
+    expect(admin).toContain('key={`product-editor-${selectedProduct.id}-${selectedProduct.product_name}`}');
+    expect(admin).toContain('key={`variant-editor-${variant.id}-${variant.variant_label}`}');
+  });
+
+  it('keeps inactive products and variants visible in admin so they can be reactivated', () => {
+    const adminDb = source('lib/sugi-admin-db.ts');
+    expect(adminDb).toMatch(/FROM products\s+WHERE \(/);
+    expect(adminDb).toMatch(/FROM product_variants\s+WHERE product_id = ANY\(\$1::bigint\[\]\)/);
+    expect(adminDb).not.toContain('FROM products\n WHERE is_active = TRUE AND (');
+    expect(adminDb).not.toContain('WHERE product_id = ANY($1::bigint[]) AND is_active = TRUE');
   });
 
   it('ships a responsive admin workspace with product search and JSON import available on mobile', () => {
@@ -65,5 +101,25 @@ describe('sales calendar and admin build source contracts', () => {
     expect(css).toContain('@media (min-width: 900px)');
     expect(css).not.toContain('.admin-desktop-workspace { display: none; }');
     expect(css).toContain('.admin-variant-row { min-width: 720px;');
+  });
+
+  it('adds an admin-only user activity feed backed by real sales, session, and audit rows', () => {
+    const adminPage = source('app/admin/page.tsx');
+    const adminClient = source('components/AdminClient.tsx');
+    const route = source('app/api/admin/activity/route.ts');
+    const activityDb = source('lib/sugi-activity.ts');
+    const migrate = source('scripts/migrate.ts');
+
+    expect(adminPage).toContain('listAdminActivity');
+    expect(adminClient).toContain('User activity');
+    expect(adminClient).toContain('/api/admin/activity');
+    expect(adminClient).toContain('activity-user-filter');
+    expect(route).toContain('requireAdmin');
+    expect(route).toContain('listAdminActivity');
+    expect(activityDb).toContain('export async function listAdminActivity');
+    expect(activityDb).toContain('sales_logs');
+    expect(activityDb).toContain('sugi_sessions');
+    expect(activityDb).toContain('sugi_activity_logs');
+    expect(migrate).toContain('CREATE TABLE IF NOT EXISTS sugi_activity_logs');
   });
 });

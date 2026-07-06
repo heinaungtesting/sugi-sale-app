@@ -1,0 +1,41 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${SUGI_APP_PORT:-3100}:3000"
+    environment:
+      NODE_ENV: production
+      SIGMA_RAG_PG_DSN: postgresql://sugi:sugi@db:5432/sugi_sale
+      SUGI_SESSION_SECRET: ${SUGI_SESSION_SECRET:-local-dev-change-me-please-32chars}
+      SUGI_COOKIE_SECURE: "false"
+      SUGI_DEFAULT_USERNAME: ${SUGI_DEFAULT_USERNAME:-hein}
+      SUGI_DEFAULT_DISPLAY_NAME: ${SUGI_DEFAULT_DISPLAY_NAME:-Hein}
+      SUGI_DEFAULT_PIN: ${SUGI_DEFAULT_PIN:-111111}
+      SUGI_DEFAULT_ROLE: ${SUGI_DEFAULT_ROLE:-admin}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "npm run migrate && npm run start"
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sugi
+      POSTGRES_PASSWORD: sugi
+      POSTGRES_DB: sugi_sale
+    ports:
+      - "127.0.0.1:${SUGI_DB_PORT:-5434}:5432"
+    volumes:
+      - sugi-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sugi -d sugi_sale"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  sugi-postgres-data:

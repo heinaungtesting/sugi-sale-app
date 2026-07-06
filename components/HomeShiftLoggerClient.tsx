@@ -6,7 +6,6 @@ import { AppHeader } from '@/components/AppHeader';
 import { PageCard } from '@/components/PageCard';
 import { SearchProductLogger } from '@/components/SearchProductLogger';
 import type { SearchableProduct, TodaySale } from '@/lib/sugi-domain';
-import { csrfFetch } from '@/lib/csrf-client';
 import {
   getSnapshot,
   initSaleQueue,
@@ -212,7 +211,7 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
   }
 
   async function changeRecentQty(id: number, delta: number) {
-    const res = await csrfFetch(`/api/sales/${id}`, {
+    const res = await fetch(`/api/sales/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ delta }),
@@ -222,7 +221,7 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
 
   async function deleteRecentSale(id: number, queueKey?: string) {
     setPointError(null);
-    const res = await csrfFetch(`/api/sales/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/sales/${id}`, { method: 'DELETE' });
     if (res.ok || res.status === 404) {
       setServerToday((current) => {
         const removed = current.recent.find((item) => item.id === id);
@@ -245,7 +244,7 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
       setPointError(t.pointFixError);
       return;
     }
-    const res = await csrfFetch(`/api/sales/${id}`, {
+    const res = await fetch(`/api/sales/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ point_value: nextPoints }),

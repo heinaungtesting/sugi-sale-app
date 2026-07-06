@@ -1,6 +1,5 @@
 import { currentUser, requireUserResponse } from '@/lib/auth';
 import { createQuickProduct, isValidIdempotencyKey, listProductsByCategory, listSearchableProducts, logSale } from '@/lib/sugi-db';
-import { requireCsrf } from '@/lib/csrf';
 
 export async function GET(req: Request) {
   const user = await currentUser();
@@ -15,8 +14,6 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const csrf = requireCsrf(req);
-  if (csrf) return csrf;
   const user = await currentUser();
   if (!user) return requireUserResponse();
   const body = await req.json().catch(() => null);

@@ -1,6 +1,5 @@
 'use client';
 
-import { csrfFetch } from './csrf-client';
 // Persistent offline-aware sale log queue.
 //
 // Goals:
@@ -29,6 +28,11 @@ const MAX_ATTEMPTS = 4;
 const BACKOFF_MS: readonly number[] = [0, 1500, 4000, 9000];
 const MAX_QUEUE_SIZE = 200;
 const BROADCAST_CHANNEL = 'sugi-sale-queue-v1';
+// Re-kick the drain on a short interval if pending entries exist. Without this,
+// a tap that hits a transient permanent error (e.g., one bad CSRF cookie) sits
+// in `pending` until the user taps again. The browser's online event is not
+// always reliable, especially on iPhone Safari.
+const STALE_DRAIN_INTERVAL_MS = 5 * 1000;
 
 export type QueueStatus = 'pending' | 'sending' | 'synced' | 'failed';
 
@@ -82,6 +86,7 @@ let subscribers: Set<Subscriber> = new Set();
 let bc: BroadcastChannel | null = null;
 let drainTimer: ReturnType<typeof setTimeout> | null = null;
 let healthTimer: ReturnType<typeof setInterval> | null = null;
+let staleDrainTimer: ReturnType<typeof setInterval> | null = null;
 let initialized = false;
 let cleanup: (() => void) | null = null;
 
@@ -188,7 +193,7 @@ async function postOnce(entry: QueueEntry): Promise<PostResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await csrfFetch('/api/sales', {
+    const res = await fetch('/api/sales', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -254,7 +259,12 @@ async function sendEntry(entry: QueueEntry): Promise<void> {
     if (result.permanent) break;
   }
   entry.lastError = lastError;
-  entry.status = entry.attempts >= MAX_ATTEMPTS ? 'failed' : 'pending';
+  // Network/server errors after MAX_ATTEMPTS → failed (user can retry manually).
+  // Permanent 4xx (e.g., one bad CSRF cookie) → stays pending; the periodic
+  // stale-recovery drain below re-attempts within seconds without a fresh tap.
+  entry.status = entry.attempts >= MAX_ATTEMPTS && lastError !== 'invalid csrf token' && lastError !== 'http_404'
+    ? 'failed'
+    : 'pending';
   persist();
   emit();
 }
@@ -299,21 +309,32 @@ async function drain(): Promise<void> {
 
 async function probeHealth(): Promise<void> {
   if (!hasStorage()) return;
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    online = false;
-    healthy = false;
-    emit();
-    return;
-  }
+  // navigator.onLine is unreliable on iPhone Safari — a brief flap can leave us
+  // stuck in the offline state until the user reloads the tab. Always trust a
+  // successful server response over the browser's online flag.
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+  let ok = false;
   try {
     const res = await fetch(HEALTH_PATH, { cache: 'no-store', credentials: 'same-origin', signal: controller.signal });
-    healthy = res.ok;
+    ok = res.ok;
   } catch {
-    healthy = false;
+    ok = false;
   } finally {
     clearTimeout(timer);
+  }
+  healthy = ok;
+  if (ok && !online) {
+    // Server reachable while the browser still thinks it is offline: trust the
+    // probe and re-enable the drain path so queued sales actually go through.
+    online = true;
+    emit();
+    scheduleDrain(0);
+    return;
+  }
+  if (!ok && typeof navigator !== 'undefined' && !navigator.onLine) {
+    online = false;
+    healthy = false;
   }
   // If we just regained health, kick the drain.
   if (healthy && online && !draining) scheduleDrain(0);
@@ -373,6 +394,17 @@ export function initSaleQueue(): () => void {
     void probeHealth();
   }, HEALTH_INTERVAL_MS);
 
+  // Periodic safety net: if any queue entry is left in `pending` because it
+  // hit a transient permanent error (e.g., a stale CSRF cookie that we could
+  // not refresh), retry without waiting for the user to tap again. iPhone
+  // Safari in particular drops the `online` event after a Wi-Fi flap, so the
+  // queue can stay pending forever otherwise.
+  staleDrainTimer = setInterval(() => {
+    if (online && entries.some((e) => e.status === 'pending') && !draining) {
+      scheduleDrain(0);
+    }
+  }, STALE_DRAIN_INTERVAL_MS);
+
   // First health probe + drain.
   void probeHealth();
   if (online) scheduleDrain(500);
@@ -384,6 +416,10 @@ export function initSaleQueue(): () => void {
     if (healthTimer) {
       clearInterval(healthTimer);
       healthTimer = null;
+    }
+    if (staleDrainTimer) {
+      clearInterval(staleDrainTimer);
+      staleDrainTimer = null;
     }
     if (drainTimer) {
       clearTimeout(drainTimer);
@@ -496,6 +532,10 @@ export function __resetForTests(): void {
   if (healthTimer) {
     clearInterval(healthTimer);
     healthTimer = null;
+  }
+  if (staleDrainTimer) {
+    clearInterval(staleDrainTimer);
+    staleDrainTimer = null;
   }
   if (bc) {
     try {

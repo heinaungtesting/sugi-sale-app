@@ -1,6 +1,5 @@
 import { currentUser, requireUserResponse } from '@/lib/auth';
 import { isValidIdempotencyKey, logSale, validSaleDate } from '@/lib/sugi-db';
-import { requireCsrf } from '@/lib/csrf';
 
 const SALE_WINDOW_MS = 60 * 1000;
 const MAX_SALES_PER_WINDOW = 30;
@@ -51,10 +50,8 @@ function validateSaleQuantity(raw: unknown): number | null {
 }
 
 export async function POST(req: Request) {
-  const csrf = requireCsrf(req);
-  if (csrf) return csrf;
-  const user = await currentUser();
-  if (!user) return requireUserResponse();
+ const user = await currentUser();
+ if (!user) return requireUserResponse();
 
   const body = await req.json().catch(() => ({}));
   const productId = Number(body.product_id);

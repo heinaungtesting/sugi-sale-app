@@ -36,24 +36,17 @@ describe('pet-records v2 asset roll-out', () => {
     }
   });
 
-  it('routes v2 assets through globals.css at expected decorative surfaces', () => {
+  it('routes every shipped v2 asset through globals.css so no page/tab feels iconless', () => {
     const css = readFileSync(join(process.cwd(), 'app/globals.css'), 'utf8');
-    // nav-pet icons now use the remaining v2 head images only.
-    expect(css).toContain("url('/cute/v2-head-dog-excited.webp')");
-    expect(css).toContain("url('/cute/v2-head-cat-grinning.webp')");
-    // metric-mascot uses v2 head icons
-    expect(css).toContain("url('/cute/v2-head-dog-excited.webp')");
-    expect(css).toContain("url('/cute/v2-head-cat-dizzy.webp')");
-    // search peek uses playtime yarn-cat
-    expect(css).toContain("url('/cute/v2-playtime-yarn-cat.webp')");
-    // login/admin decorative dressing uses remaining v2 images.
-    expect(css).toContain("url('/cute/v2-head-dog-eating.webp')");
-    expect(css).toContain("url('/cute/v2-admin-record-review.webp')");
-    // toast success/fail use head icons
-    expect(css).toContain("url('/cute/v2-head-dog-excited.webp')");
-    expect(css).toContain("url('/cute/v2-head-dog-grumpy.webp')");
-    // small sticker accents consolidate on the remaining accessories sheet.
-    expect(css).toContain("url('/cute/v2-accessories.webp')");
+    for (const filename of [...V2_HEADS, ...V2_CLUSTERS]) {
+      expect(css, `asset not wired in CSS: ${filename}`).toContain(`url('/cute/${filename}')`);
+    }
+
+    // Main tab icons are distinct image assets, not empty/duplicated placeholders.
+    expect(css).toContain(".nav-pet.dog { background-image: url('/cute/v2-head-dog-excited.webp')");
+    expect(css).toContain(".nav-pet.cat.gray { background-image: url('/cute/v2-head-cat-grinning.webp')");
+    expect(css).toContain(".nav-pet.gold { background-image: url('/cute/v2-head-cat-fish.webp')");
+    expect(css).toContain(".nav-pet.cat.orange { background-image: url('/cute/v2-head-cat-winking.webp')");
   });
 
   it('does not point nav-pet or metric-mascot at the old broken assets', () => {

@@ -7,11 +7,10 @@ const source = (path: string) => readFileSync(join(process.cwd(), path), 'utf8')
 
 const UNSAFE_ROUTES = [
   'app/api/auth/logout/route.ts',
-  'app/api/products/route.ts',
-  'app/api/sales/route.ts',
-  'app/api/sales/[id]/route.ts',
-  'app/api/sales/latest/route.ts',
-  'app/api/sales/today/product/route.ts',
+  // Frontline sale routes are intentionally exempted: product taps, quick-add,
+  // corrections, and undo must keep working on iPhone Safari even when the
+  // non-HttpOnly CSRF cookie gets stale/dropped. Auth session, idempotency,
+  // validation, ownership checks, and rate limiting still apply.
   'app/api/admin/import/route.ts',
   'app/api/admin/points/route.ts',
   'app/api/admin/products/route.ts',
@@ -54,7 +53,7 @@ describe('CSRF hardening', () => {
     expect(verifyCsrfRequest(crossOrigin, 'secret')).toBe(false);
   });
 
-  it('guards every authenticated state-changing route with requireCsrf', () => {
+  it('guards every authenticated state-changing route with requireCsrf except frontline sale logging', () => {
     for (const path of UNSAFE_ROUTES) {
       const text = source(path);
       expect(text, `${path} must import requireCsrf`).toContain('requireCsrf');
@@ -62,22 +61,78 @@ describe('CSRF hardening', () => {
     }
   });
 
-  it('client state-changing fetches use csrfFetch', () => {
+  it('exempts frontline sale routes from CSRF so iPhone workflows cannot get stuck', () => {
+    for (const path of [
+      'app/api/sales/route.ts',
+      'app/api/products/route.ts',
+      'app/api/sales/[id]/route.ts',
+      'app/api/sales/latest/route.ts',
+      'app/api/sales/today/product/route.ts',
+    ]) {
+      const text = source(path);
+      expect(text, `${path} must not call requireCsrf`).not.toContain('requireCsrf');
+      expect(text, `${path} must still require a logged-in user`).toContain('currentUser()');
+    }
+    expect(source('app/api/sales/route.ts')).toContain('recordSaleWrite(user.id)');
+    expect(source('app/api/sales/route.ts')).toContain('isValidIdempotencyKey');
+    expect(source('app/api/products/route.ts')).toContain('isValidIdempotencyKey');
+  });
+
+  it('frontline today-by-product undo uses Tokyo today, not database CURRENT_DATE', () => {
+    const db = source('lib/sugi-db.ts');
+    const fnStart = db.indexOf('export async function deleteTodaySaleByProduct');
+    const fn = db.slice(fnStart, fnStart + 700);
+    expect(fn).toContain('todaySaleDate()');
+    expect(fn).not.toContain('CURRENT_DATE');
+  });
+
+  it('guarded client mutations use csrfFetch', () => {
     for (const path of [
       'components/AppHeader.tsx',
+      'components/AdminClient.tsx',
+    ]) {
+      const text = source(path);
+      expect(text, `${path} should use csrfFetch for guarded mutations`).toContain('csrfFetch');
+    }
+  });
+
+  it('frontline sale clients use plain fetch because their routes are CSRF-exempt', () => {
+    for (const path of [
       'components/SearchProductLogger.tsx',
       'components/HomeShiftLoggerClient.tsx',
       'components/SalesCalendarClient.tsx',
-      'components/AdminClient.tsx',
       'lib/sale-queue.ts',
     ]) {
       const text = source(path);
-      expect(text, `${path} should use csrfFetch for mutations`).toContain('csrfFetch');
+      expect(text, `${path} should not use csrfFetch for frontline sale operations`).not.toContain('csrfFetch');
     }
+    expect(source('components/SearchProductLogger.tsx')).toContain("fetch('/api/products'");
+    expect(source('components/HomeShiftLoggerClient.tsx')).toContain('fetch(`/api/sales/${id}`');
+    expect(source('components/SalesCalendarClient.tsx')).toContain('fetch(`/api/sales/${id}`');
+    expect(source('lib/sale-queue.ts')).toContain("fetch('/api/sales'");
+  });
+
+  it('sales queue uses plain fetch because POST /api/sales is CSRF-exempt', () => {
+    const text = source('lib/sale-queue.ts');
+    expect(text).not.toContain('csrfFetch');
+    expect(text).toContain("fetch('/api/sales'");
   });
 
   it('login route issues a CSRF cookie for the logged-in browser', () => {
     const loginRoute = source('app/api/auth/login/route.ts');
     expect(loginRoute).toContain('setCsrfCookie');
+  });
+
+  it('admin CRUD forms use explicit submit handlers so CSRF fetch runs in the browser', () => {
+    const adminClient = source('components/AdminClient.tsx');
+    expect(adminClient).toContain('submitAdminForm');
+    expect(adminClient).toContain('event.preventDefault()');
+    expect(adminClient).toContain('csrfFetch');
+    expect(adminClient).toContain('onSubmit={(event) => submitAdminForm(event, saveProduct)}');
+    expect(adminClient).toContain('onSubmit={(event) => submitAdminForm(event, saveVariant)}');
+    expect(adminClient).toContain('onSubmit={(event) => submitAdminForm(event, saveUser)}');
+    expect(adminClient).not.toContain('action={saveProduct}');
+    expect(adminClient).not.toContain('action={saveVariant}');
+    expect(adminClient).not.toContain('action={saveUser}');
   });
 });

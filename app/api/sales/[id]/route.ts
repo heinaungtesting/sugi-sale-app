@@ -1,10 +1,8 @@
 import { currentUser, requireUserResponse } from '@/lib/auth';
 import { deleteSaleById, updateSalePoints, updateSaleQuantity } from '@/lib/sugi-db';
-import { requireCsrf } from '@/lib/csrf';
+import { logActivity } from '@/lib/sugi-activity';
 
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const csrf = requireCsrf(req);
-  if (csrf) return csrf;
   const user = await currentUser();
   if (!user) return requireUserResponse();
   const { id } = await params;
@@ -16,8 +14,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 }
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const csrf = requireCsrf(req);
-  if (csrf) return csrf;
   const user = await currentUser();
   if (!user) return requireUserResponse();
   const { id } = await params;
@@ -28,6 +24,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (!Number.isInteger(saleId) || saleId <= 0 || !Number.isFinite(pointValue) || pointValue <= 0) return Response.json({ error: 'invalid request' }, { status: 400 });
     const sale = await updateSalePoints(user.id, saleId, pointValue);
     if (!sale) return Response.json({ error: 'sale not found' }, { status: 404 });
+    await logActivity({ userId: user.id, actorUserId: user.id, action: 'sale_points_corrected', summary: `販売点数修正: ${sale.product_name} → ${pointValue}pt`, details: { sale_id: saleId, product_name: sale.product_name, point_value: pointValue, quantity: sale.quantity, total_points: sale.total_points } });
     return Response.json(sale);
   }
   const delta = Number(body.delta);

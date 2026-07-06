@@ -1,5 +1,7 @@
 import { query, queryOne } from './db';
+import { applyDueMonthlyPointCampaigns } from './sugi-admin-db';
 import { applyDefaultProductAliases, categoryLabel, isLoggableProduct, normalizeProductCategory, rankProductsForSearch, type Category, type Product, type SearchableProduct, type TodaySale } from './sugi-domain';
+import { syncProductPointValue, syncVariantPointValueBySaleName } from './sugi-point-sync';
 
 export type DatedSale = TodaySale & { sold_date: string; category: string; created_at?: string };
 export type MonthSaleTotal = { sold_date: string; total_points: number; total_items: number };
@@ -100,7 +102,8 @@ function hydrateSearchRows(rows: SearchableProductRow[]): SearchableProduct[] {
 }
 
 export async function listSearchableProducts(userId: number, search = '', limit = 60): Promise<SearchableProduct[]> {
-  const normalizedSearch = normalizeSearchParam(search);
+ await applyDueMonthlyPointCampaigns();
+ const normalizedSearch = normalizeSearchParam(search);
   const safeLimit = Math.max(1, Math.min(Number(limit) || 60, normalizedSearch ? 200 : 1000));
   const rows = await query<SearchableProductRow>(
     `WITH sale_counts AS (
@@ -195,7 +198,8 @@ export async function logSale(
   soldDate?: string | null,
   idempotencyKey?: string | null,
 ): Promise<LoggedSale | null> {
-  const validDate = validSaleDate(soldDate) ?? todaySaleDate();
+ await applyDueMonthlyPointCampaigns();
+ const validDate = validSaleDate(soldDate) ?? todaySaleDate();
   const product = variantId ? await getVisibleProductVariant(userId, productId, variantId) : await getVisibleProduct(userId, productId);
   if (!product || !isLoggableProduct(product)) return null;
   const qty = quantity;
@@ -338,16 +342,11 @@ export async function updateSalePoints(userId: number, saleId: number, pointValu
   );
   if (!saleBefore) return null;
 
-  const base = await queryOne<{ product_name: string }>(`SELECT product_name FROM products WHERE id = $1`, [saleBefore.product_id]);
+  const base = await queryOne<{ id: string; product_name: string }>(`SELECT id, product_name FROM products WHERE id = $1`, [saleBefore.product_id]);
   if (base?.product_name && saleBefore.product_name !== base.product_name && saleBefore.product_name.startsWith(`${base.product_name} `)) {
-    const variantLabel = saleBefore.product_name.slice(base.product_name.length).trim();
-    await query(
-      `UPDATE product_variants SET point_value = $1, updated_at = now()
-       WHERE product_id = $2 AND variant_label = $3`,
-      [points, saleBefore.product_id, variantLabel]
-    );
+    await syncVariantPointValueBySaleName(Number(base.id), saleBefore.product_name, points);
   } else {
-    await query(`UPDATE products SET point_value = $1, updated_at = now() WHERE id = $2`, [points, saleBefore.product_id]);
+    await syncProductPointValue(Number(saleBefore.product_id), points);
   }
 
   const sale = await queryOne<TodaySale>(
@@ -359,11 +358,12 @@ export async function updateSalePoints(userId: number, saleId: number, pointValu
 }
 
 export async function deleteTodaySaleByProduct(userId: number, productId: number): Promise<TodaySale | null> {
+  const today = todaySaleDate();
   const deleted = await queryOne<TodaySale>(
     `DELETE FROM sales_logs WHERE id = (
-       SELECT id FROM sales_logs WHERE user_id = $1 AND sold_date = CURRENT_DATE AND product_id = $2 ORDER BY created_at DESC, id DESC LIMIT 1
+       SELECT id FROM sales_logs WHERE user_id = $1 AND sold_date = $3::date AND product_id = $2 ORDER BY created_at DESC, id DESC LIMIT 1
      ) RETURNING id, product_name, quantity, points_per_item, total_points`,
-    [userId, productId]
+    [userId, productId, today]
   );
   return deleted ? normalizeSale(deleted) : null;
 }

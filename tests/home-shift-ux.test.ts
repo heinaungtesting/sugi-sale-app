@@ -64,7 +64,7 @@ describe('home shift-speed UI contract', () => {
     const db = source('lib/sugi-db.ts');
     expect(logger).toContain('quick-add-form');
     expect(logger).toContain('Create & log');
-    expect(logger).toContain("csrfFetch('/api/products'");
+    expect(logger).toContain("fetch('/api/products'");
     expect(route).toContain('export async function POST');
     expect(route).toContain('createQuickProduct');
     expect(route).toContain('logSale');
@@ -80,7 +80,8 @@ describe('home shift-speed UI contract', () => {
     expect(client).toContain('point_value: nextPoints');
     expect(route).toContain('updateSalePoints');
     expect(db).toContain('UPDATE sales_logs SET points_per_item');
-    expect(db).toContain('UPDATE product_variants SET point_value');
+    expect(db).toContain('syncVariantPointValueBySaleName');
+    expect(source('lib/sugi-point-sync.ts')).toContain('UPDATE product_variants SET point_value');
   });
 
   it('normalizes full-width Japanese numeric input before saving point corrections', () => {

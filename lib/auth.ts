@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import bcrypt from 'bcryptjs';
 import { query, queryOne } from './db';
 import { createSessionToken, verifySessionToken, type SessionClaims } from './session-token';
+import { logActivity } from './sugi-activity';
 import type { SessionUser } from './sugi-domain';
 
 export const SESSION_COOKIE = 'sugi_session';
@@ -59,6 +60,7 @@ export async function setSession(user: SessionUser): Promise<void> {
   const claims = verifySessionToken(token, sessionSecret());
   if (!claims) throw new Error('created invalid session token');
   await createSessionRecord(claims);
+  void logActivity({ userId: user.id, actorUserId: user.id, action: 'login', summary: 'ログイン', details: { username: user.username } }).catch(() => {});
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -73,7 +75,10 @@ export async function clearSession(): Promise<void> {
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   const claims = verifySessionToken(token, sessionSecret());
-  if (claims) await revokeSession(claims.jti);
+  if (claims) {
+  await revokeSession(claims.jti);
+  void logActivity({ userId: claims.id, actorUserId: claims.id, action: 'logout', summary: 'ログアウト', details: { jti: claims.jti } }).catch(() => {});
+  }
   jar.delete(SESSION_COOKIE);
 }
 
