@@ -7,10 +7,11 @@ const source = (path: string) => readFileSync(join(process.cwd(), path), 'utf8')
 
 const UNSAFE_ROUTES = [
   'app/api/auth/logout/route.ts',
-  // Frontline sale routes are intentionally exempted: product taps, quick-add,
-  // corrections, and undo must keep working on iPhone Safari even when the
-  // non-HttpOnly CSRF cookie gets stale/dropped. Auth session, idempotency,
-  // validation, ownership checks, and rate limiting still apply.
+  'app/api/sales/route.ts',
+  'app/api/sales/[id]/route.ts',
+  'app/api/sales/latest/route.ts',
+  'app/api/sales/today/product/route.ts',
+  'app/api/products/route.ts',
   'app/api/admin/import/route.ts',
   'app/api/admin/points/route.ts',
   'app/api/admin/products/route.ts',
@@ -67,7 +68,7 @@ describe('CSRF hardening', () => {
     expect(verifyCsrfRequest(crossOrigin, 'secret')).toBe(false);
   });
 
-  it('guards every authenticated state-changing route with requireCsrf except frontline sale logging', () => {
+  it('guards authenticated state-changing routes with requireCsrf', () => {
     for (const path of UNSAFE_ROUTES) {
       const text = source(path);
       expect(text, `${path} must import requireCsrf`).toContain('requireCsrf');
@@ -75,7 +76,7 @@ describe('CSRF hardening', () => {
     }
   });
 
-  it('exempts frontline sale routes from CSRF so iPhone workflows cannot get stuck', () => {
+  it('protects frontline sale routes with double-submit CSRF', () => {
     for (const path of [
       'app/api/sales/route.ts',
       'app/api/sales/[id]/route.ts',
@@ -83,7 +84,7 @@ describe('CSRF hardening', () => {
       'app/api/sales/today/product/route.ts',
     ]) {
       const text = source(path);
-      expect(text, `${path} must not call requireCsrf`).not.toContain('requireCsrf');
+      expect(text, `${path} must call requireCsrf`).toContain('requireCsrf(req)');
       expect(text, `${path} must still require a logged-in user`).toContain('currentUser()');
     }
     expect(source('domain/sales/sale-service.ts')).toContain('reserveSaleWrite(userId)');
@@ -92,7 +93,7 @@ describe('CSRF hardening', () => {
     const productPost = productsRoute.slice(productsRoute.indexOf('export async function POST'), productsRoute.indexOf('export async function PATCH'));
     const productPatch = productsRoute.slice(productsRoute.indexOf('export async function PATCH'));
     expect(productPost).toContain('isValidIdempotencyKey');
-    expect(productPost).not.toContain('requireCsrf(req)');
+    expect(productPost).toContain('requireCsrf(req)');
     expect(productPatch).toContain('requireCsrf(req)');
   });
 
@@ -114,27 +115,26 @@ describe('CSRF hardening', () => {
     }
   });
 
-  it('frontline sale clients use plain fetch because their routes are CSRF-exempt', () => {
+  it('frontline sale clients use csrfFetch', () => {
     for (const path of [
       'components/HomeShiftLoggerClient.tsx',
       'components/SalesCalendarClient.tsx',
       'lib/sale-queue.ts',
     ]) {
       const text = source(path);
-      expect(text, `${path} should not use csrfFetch for frontline sale operations`).not.toContain('csrfFetch');
+      expect(text, `${path} should use csrfFetch for frontline sale operations`).toContain('csrfFetch');
     }
     const logger = source('components/SearchProductLogger.tsx');
-    expect(logger).toContain("fetch('/api/products'");
     expect(logger).toContain("csrfFetch('/api/products'");
-    expect(source('components/HomeShiftLoggerClient.tsx')).toContain('fetch(`/api/sales/${id}`');
-    expect(source('components/SalesCalendarClient.tsx')).toContain('fetch(`/api/sales/${id}`');
-    expect(source('lib/sale-queue.ts')).toContain("fetch('/api/sales'");
+    expect(source('components/HomeShiftLoggerClient.tsx')).toContain('csrfFetch(`/api/sales/${id}`');
+    expect(source('components/SalesCalendarClient.tsx')).toContain('csrfFetch(`/api/sales/${id}`');
+    expect(source('lib/sale-queue.ts')).toContain("csrfFetch('/api/sales'");
   });
 
-  it('sales queue uses plain fetch because POST /api/sales is CSRF-exempt', () => {
+  it('sales queue uses csrfFetch with automatic token refresh', () => {
     const text = source('lib/sale-queue.ts');
-    expect(text).not.toContain('csrfFetch');
-    expect(text).toContain("fetch('/api/sales'");
+    expect(text).toContain('csrfFetch');
+    expect(text).toContain("csrfFetch('/api/sales'");
   });
 
   it('login route issues a CSRF cookie for the logged-in browser', () => {

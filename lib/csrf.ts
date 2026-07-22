@@ -50,38 +50,56 @@ function parseCookie(header: string | null, name: string): string | null {
   return null;
 }
 
-function sameOrigin(req: Request): boolean {
-  const url = new URL(req.url);
-  const forwardedHost = req.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
-  const requestHost = forwardedHost || req.headers.get('host')?.trim();
+const DEFAULT_ALLOWED_HOSTS = new Set([
+  'herme-agents.tail71ac56.ts.net',
+  '100.111.161.73',
+  'localhost',
+  '127.0.0.1',
+]);
 
-  function matchesRequestOrigin(value: string): boolean {
-    try {
-      const candidate = new URL(value);
-      // Next.js may see the internal HTTP upstream URL while the browser uses the
-      // public HTTPS Tailscale origin. The browser-controlled Host header cannot be
-      // changed cross-origin, so an exact host match safely handles that proxy hop.
-      return candidate.origin === url.origin || Boolean(requestHost && candidate.host === requestHost);
-    } catch {
-      return false;
-    }
+function normalizedHostname(value: string): string | null {
+  try {
+    const withScheme = value.includes('://') ? value : `http://${value}`;
+    return new URL(withScheme).hostname.toLowerCase().replace(/\.$/, '');
+  } catch {
+    return null;
   }
+}
 
-  const origin = req.headers.get('origin');
-  if (origin) return matchesRequestOrigin(origin);
-  const referer = req.headers.get('referer');
-  if (referer) return matchesRequestOrigin(referer);
-  // Non-browser clients may omit both. Token validation still protects browser CSRF.
-  return true;
+function allowedHostnames(): Set<string> {
+  const configured = (process.env.SUGI_ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((value) => normalizedHostname(value.trim()))
+    .filter((value): value is string => Boolean(value));
+  return new Set([...DEFAULT_ALLOWED_HOSTS, ...configured]);
+}
+
+function allowedRequestHost(req: Request): boolean {
+  const allowed = allowedHostnames();
+  const requestUrl = new URL(req.url);
+  const forwardedHost = req.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
+  const effectiveHost = forwardedHost || req.headers.get('host')?.trim() || requestUrl.host;
+  const requestHostname = normalizedHostname(effectiveHost);
+  if (!requestHostname || !allowed.has(requestHostname)) return false;
+
+  // Origin/Referer is a secondary signal. It may legitimately differ from the
+  // internal upstream URL behind Tailscale, but it must still be explicitly allowed.
+  const browserSource = req.headers.get('origin') || req.headers.get('referer');
+  if (!browserSource) return true;
+  const sourceHostname = normalizedHostname(browserSource);
+  return Boolean(sourceHostname && allowed.has(sourceHostname));
 }
 
 export function verifyCsrfRequest(req: Request, secret = csrfSecret()): boolean {
-  if (!sameOrigin(req)) return false;
+  // The signed double-submit token is the primary CSRF control. Host validation is
+  // deliberately secondary so Tailscale proxy scheme/port changes cannot silently
+  // break valid devices.
   const cookieToken = parseCookie(req.headers.get('cookie'), CSRF_COOKIE);
   const headerToken = req.headers.get(CSRF_HEADER);
   if (!cookieToken || !headerToken) return false;
   if (!constantEqual(cookieToken, headerToken)) return false;
-  return isSignedCsrfToken(cookieToken, secret);
+  if (!isSignedCsrfToken(cookieToken, secret)) return false;
+  return allowedRequestHost(req);
 }
 
 export function csrfErrorResponse(): Response {

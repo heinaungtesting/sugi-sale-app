@@ -16,7 +16,7 @@ export async function createSale(
   context: { requestId: string; queueAttempt?: number },
 ): Promise<CreateSaleResult> {
   const started = performance.now();
-  if (!reserveSaleWrite(userId)) {
+  if (!(await reserveSaleWrite(userId))) {
     incrementMetric('sale.rate_limited');
     logEvent('sale_rate_limited', { requestId: context.requestId, userId, productId: command.productId }, 'warn');
     return { kind: 'rate_limited' };
@@ -32,12 +32,12 @@ export async function createSale(
       command.idempotencyKey,
     );
     if (!sale) {
-      releaseSaleWrite(userId);
+      await releaseSaleWrite(userId);
       incrementMetric('sale.not_found');
       return { kind: 'not_found' };
     }
     if (sale.idempotent_replay) {
-      releaseSaleWrite(userId);
+      await releaseSaleWrite(userId);
       incrementMetric('sale.replay');
     } else {
       incrementMetric('sale.created');
@@ -55,7 +55,7 @@ export async function createSale(
     });
     return { kind: 'created', sale };
   } catch (error) {
-    releaseSaleWrite(userId);
+    await releaseSaleWrite(userId);
     incrementMetric('sale.failed');
     const durationMs = performance.now() - started;
     observeMetric('sale.create.duration_ms', durationMs);

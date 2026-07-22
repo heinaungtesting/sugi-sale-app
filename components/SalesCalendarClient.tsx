@@ -7,6 +7,7 @@ import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, t
 import { enqueueSale, getSnapshot, initSaleQueue, pruneSyncedToServerIds, subscribe, type QueueSnapshot } from '@/lib/sale-queue';
 import { buildCalendarCells, monthAnchorDate } from '@/lib/sales-calendar';
 import { mergeDisplayedSales } from '@/lib/sale-display';
+import { csrfFetch } from '@/lib/csrf-client';
 
 type MonthTotal = { sold_date: string; total_points: number; total_items: number };
 type SaleLog = { id: number; product_name: string; quantity: number; total_points: number; points_per_item: number; _queueKey?: string };
@@ -136,11 +137,11 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
     if (res.ok) setTotals(await res.json());
   }
   async function deleteLog(id: number) {
-    const res = await fetch(`/api/sales/${id}`, { method: 'DELETE' });
+    const res = await csrfFetch(`/api/sales/${id}`, { method: 'DELETE' });
     if (res.ok) { await refreshSelected(); router.refresh(); }
   }
   async function changeQty(id: number, delta: number) {
-    const res = await fetch(`/api/sales/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delta }) });
+    const res = await csrfFetch(`/api/sales/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delta }) });
     if (res.ok) { await refreshSelected(); router.refresh(); }
   }
   async function addProductToSelectedDate(variant: ProductVariant) {

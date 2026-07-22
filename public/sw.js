@@ -1,8 +1,13 @@
-const CACHE_VERSION = 'sugi-pwa-v14';
+const CACHE_VERSION = 'sugi-pwa-v15';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const OFFLINE_URL = '/offline';
 const LOCAL_URL = '/local';
+const SALE_QUEUE_DB = 'sugi-sale-queue';
+const SALE_QUEUE_STORE = 'sales';
+const SALE_SYNC_TAG = 'sugi-sale-queue-sync';
+const SALE_QUEUE_LEASE_MS = 90 * 1000;
+const SALE_QUEUE_OWNER = 'service-worker';
 const PRECACHE = [
   OFFLINE_URL,
   LOCAL_URL,
@@ -29,12 +34,6 @@ self.addEventListener('activate', (event) => {
         .map((key) => caches.delete(key)),
     );
     await self.clients.claim();
-
-    // An installed PWA can keep its old JavaScript alive after a worker update.
-    // Reload open windows once so the user receives the newly deployed UI without
-    // clearing IndexedDB, pending sale queues, or authentication state.
-    // Let activation finish before navigating. Awaiting navigate() from inside
-    // activate can deadlock because the navigation waits for activation itself.
     setTimeout(() => {
       void self.clients.matchAll({ type: 'window' }).then((windows) =>
         Promise.all(windows.map((client) => client.navigate(client.url))),
@@ -74,7 +73,158 @@ async function cacheFirst(request) {
   return response;
 }
 
+function openSaleQueueDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(SALE_QUEUE_DB, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(SALE_QUEUE_STORE)) {
+        const store = db.createObjectStore(SALE_QUEUE_STORE, { keyPath: 'idempotencyKey' });
+        store.createIndex('status', 'status');
+        store.createIndex('createdAt', 'createdAt');
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('sale queue database unavailable'));
+  });
+}
+
+function idbRequest(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('sale queue request failed'));
+  });
+}
+
+function transactionDone(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error('sale queue transaction failed'));
+    transaction.onabort = () => reject(transaction.error || new Error('sale queue transaction aborted'));
+  });
+}
+
+async function readSaleQueue(db) {
+  const transaction = db.transaction(SALE_QUEUE_STORE, 'readonly');
+  const records = await idbRequest(transaction.objectStore(SALE_QUEUE_STORE).getAll());
+  await transactionDone(transaction);
+  return records;
+}
+
+async function writeSaleQueueEntry(db, entry) {
+  const transaction = db.transaction(SALE_QUEUE_STORE, 'readwrite');
+  transaction.objectStore(SALE_QUEUE_STORE).put(entry);
+  await transactionDone(transaction);
+}
+
+async function claimNextSaleQueueEntry(db) {
+  const now = Date.now();
+  const transaction = db.transaction(SALE_QUEUE_STORE, 'readwrite');
+  const store = transaction.objectStore(SALE_QUEUE_STORE);
+  const entries = await idbRequest(store.getAll());
+  const entry = entries
+    .filter((entry) => entry.status === 'pending'
+      || (entry.status === 'sending' && entry.leaseExpiresAt <= now))
+    .sort((a, b) => a.enqueuedAt - b.enqueuedAt)[0];
+  if (!entry) {
+    await transactionDone(transaction);
+    return null;
+  }
+  entry.status = 'sending';
+  entry.leaseOwner = SALE_QUEUE_OWNER;
+  entry.leaseExpiresAt = now + SALE_QUEUE_LEASE_MS;
+  store.put(entry);
+  await transactionDone(transaction);
+  return entry;
+}
+
+async function csrfToken() {
+  const response = await fetch('/api/auth/csrf', {
+    method: 'GET',
+    cache: 'no-store',
+    credentials: 'include',
+  });
+  if (!response.ok) throw new Error('csrf token unavailable');
+  const body = await response.json();
+  if (typeof body.token !== 'string') throw new Error('csrf token missing');
+  return body.token;
+}
+
+async function notifyQueueClients() {
+  const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+  for (const client of windows) client.postMessage({ type: 'SALE_QUEUE_UPDATED' });
+}
+
+async function replaySaleQueue() {
+  const db = await openSaleQueueDb();
+  while (true) {
+    const entry = await claimNextSaleQueueEntry(db);
+    if (!entry) break;
+    entry.attempts = Number(entry.attempts || 0) + 1;
+    await writeSaleQueueEntry(db, entry);
+    try {
+      const token = await csrfToken();
+      const response = await fetch('/api/sales', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': token,
+          'X-Queue-Attempt': String(entry.attempts),
+        },
+        body: JSON.stringify({
+          product_id: entry.productId,
+          variant_id: entry.variantId ?? undefined,
+          quantity: entry.quantity,
+          sold_date: entry.soldDate ?? undefined,
+          idempotency_key: entry.idempotencyKey,
+        }),
+        credentials: 'include',
+        cache: 'no-store',
+      });
+
+      if (response.ok) {
+        entry.sale = await response.json();
+        entry.status = 'synced';
+        delete entry.lastError;
+        delete entry.leaseOwner;
+        delete entry.leaseExpiresAt;
+        await writeSaleQueueEntry(db, entry);
+        continue;
+      }
+
+      let body = null;
+      try { body = await response.json(); } catch { /* non-JSON error */ }
+      entry.lastError = body?.error || `http_${response.status}`;
+      const transient = response.status === 408 || response.status === 429 || response.status >= 500;
+      entry.status = transient || response.status === 401 || response.status === 403 ? 'pending' : 'failed';
+      delete entry.leaseOwner;
+      delete entry.leaseExpiresAt;
+      await writeSaleQueueEntry(db, entry);
+      if (entry.status === 'pending') throw new Error(entry.lastError);
+    } catch (error) {
+      if (entry.status === 'sending') {
+        entry.status = 'pending';
+        entry.lastError = error instanceof Error ? error.message : 'network';
+      }
+      delete entry.leaseOwner;
+      delete entry.leaseExpiresAt;
+      await writeSaleQueueEntry(db, entry);
+      await notifyQueueClients();
+      throw error;
+    }
+  }
+  await notifyQueueClients();
+}
+
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'sugi-sale-queue-sync') event.waitUntil(replaySaleQueue());
+});
+
 self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SYNC_SALES') {
+    event.waitUntil(replaySaleQueue().catch(() => undefined));
+    return;
+  }
   if (event.data?.type === 'CACHE_APP_SHELL' && Array.isArray(event.data.urls)) {
     const urls = event.data.urls
       .map((value) => {
@@ -94,8 +244,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET' || url.origin !== self.location.origin) return;
 
-  // API calls must always reach the server. Failed sale writes are handled by
-  // the app's idempotent localStorage queue, never by HTTP response caching.
+  // API calls always reach the server. Failed writes stay in the idempotent IndexedDB queue.
   if (url.pathname.startsWith('/api/')) return;
 
   if (event.request.mode === 'navigate') {

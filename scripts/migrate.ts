@@ -41,6 +41,21 @@ async function main() {
   await pool.query(`ALTER TABLE sugi_sessions ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT ''`);
   await pool.query(`ALTER TABLE sugi_sessions ADD COLUMN IF NOT EXISTS device_label TEXT NOT NULL DEFAULT 'Unknown device'`);
 
+  // Shared throttling state for all app instances. UNLOGGED avoids WAL overhead while
+  // retaining state across ordinary application and PostgreSQL restarts.
+  await pool.query(`
+    CREATE UNLOGGED TABLE IF NOT EXISTS sugi_rate_limits (
+      scope TEXT NOT NULL,
+      subject_key TEXT NOT NULL,
+      request_count INTEGER NOT NULL DEFAULT 0 CHECK (request_count >= 0),
+      window_started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      expires_at TIMESTAMPTZ NOT NULL,
+      PRIMARY KEY (scope, subject_key)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sugi_rate_limits_expiry ON sugi_rate_limits(expires_at)`);
+  await pool.query(`DELETE FROM sugi_rate_limits WHERE expires_at <= now()`);
+
   await pool.query(`
   CREATE TABLE IF NOT EXISTS sugi_point_campaigns (
   campaign_month TEXT PRIMARY KEY,

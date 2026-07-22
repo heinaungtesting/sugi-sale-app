@@ -1,66 +1,69 @@
 'use client';
 
+import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
+
 const DB_NAME = 'sugi-sale-queue';
 const DB_VERSION = 1;
 const STORE_NAME = 'sales';
 const LEGACY_KEY = 'sugi-sale-queue-v1';
 
-let dbPromise: Promise<IDBDatabase> | null = null;
+type StoredQueueRecord = Record<string, unknown> & {
+  idempotencyKey: string;
+  status?: string;
+  createdAt?: string;
+  leaseOwner?: string;
+  leaseExpiresAt?: number;
+};
 
-function legacyRecords(): unknown[] {
+interface SaleQueueDb extends DBSchema {
+  sales: {
+    key: string;
+    value: StoredQueueRecord;
+    indexes: { status: string; createdAt: string };
+  };
+}
+
+let dbPromise: Promise<IDBPDatabase<SaleQueueDb>> | null = null;
+
+function isStoredQueueRecord(value: unknown): value is StoredQueueRecord {
+  return typeof value === 'object'
+    && value !== null
+    && typeof (value as { idempotencyKey?: unknown }).idempotencyKey === 'string';
+}
+
+export function loadLegacyQueueRecords(): StoredQueueRecord[] {
   try {
+    if (typeof window === 'undefined') return [];
     const raw = window.localStorage.getItem(LEGACY_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed : [];
+    return Array.isArray(parsed) ? parsed.filter(isStoredQueueRecord) : [];
   } catch {
     return [];
   }
 }
 
-function openQueueDb(): Promise<IDBDatabase> {
-  if (dbPromise) return dbPromise;
-  dbPromise = new Promise((resolve, reject) => {
-    if (typeof indexedDB === 'undefined') {
-      reject(new Error('indexeddb unavailable'));
-      return;
-    }
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_NAME)) {
-        const store = db.createObjectStore(STORE_NAME, { keyPath: 'idempotencyKey' });
-        store.createIndex('status', 'status', { unique: false });
-        store.createIndex('createdAt', 'createdAt', { unique: false });
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('indexeddb open failed'));
-  });
+function openQueueDb(): Promise<IDBPDatabase<SaleQueueDb>> {
+  if (!dbPromise) {
+    if (typeof indexedDB === 'undefined') return Promise.reject(new Error('indexeddb unavailable'));
+    dbPromise = openDB<SaleQueueDb>(DB_NAME, DB_VERSION, {
+      upgrade(db) {
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          const store = db.createObjectStore(STORE_NAME, { keyPath: 'idempotencyKey' });
+          store.createIndex('status', 'status');
+          store.createIndex('createdAt', 'createdAt');
+        }
+      },
+      terminated() { dbPromise = null; },
+    });
+  }
   return dbPromise;
 }
 
-function requestResult<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error('indexeddb request failed'));
-  });
-}
-
-function transactionDone(transaction: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error ?? new Error('indexeddb transaction failed'));
-    transaction.onabort = () => reject(transaction.error ?? new Error('indexeddb transaction aborted'));
-  });
-}
-
 export async function loadQueueRecords(): Promise<unknown[]> {
-  const legacy = legacyRecords();
+  const legacy = loadLegacyQueueRecords();
   try {
     const db = await openQueueDb();
-    const transaction = db.transaction(STORE_NAME, 'readonly');
-    const stored = await requestResult(transaction.objectStore(STORE_NAME).getAll());
-    await transactionDone(transaction);
+    const stored = await db.getAll(STORE_NAME);
     if (stored.length > 0) return stored;
     if (legacy.length > 0) {
       await saveQueueRecords(legacy);
@@ -73,38 +76,74 @@ export async function loadQueueRecords(): Promise<unknown[]> {
   }
 }
 
-export async function saveQueueRecords(records: readonly unknown[]): Promise<'indexeddb' | 'localstorage' | 'memory'> {
+export async function saveQueueRecords(records: readonly unknown[]): Promise<'indexeddb' | 'memory'> {
   try {
     const db = await openQueueDb();
-    const transaction = db.transaction(STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(STORE_NAME);
-    store.clear();
-    for (const record of records) store.put(record);
-    await transactionDone(transaction);
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const existing = await tx.store.getAll();
+    const incomingKeys = new Set<string>();
+    const now = Date.now();
+    for (const record of records) {
+      if (!isStoredQueueRecord(record)) continue;
+      incomingKeys.add(record.idempotencyKey);
+      const current = existing.find((item) => item.idempotencyKey === record.idempotencyKey);
+      const foreignActiveLease = Boolean(
+        current?.leaseOwner
+        && Number(current.leaseExpiresAt ?? 0) > now
+        && current.leaseOwner !== record.leaseOwner
+      );
+      if (!foreignActiveLease) await tx.store.put(record);
+    }
+    for (const current of existing) {
+      const activelyLeased = current.leaseOwner && Number(current.leaseExpiresAt ?? 0) > now;
+      if (!incomingKeys.has(current.idempotencyKey) && !activelyLeased) {
+        await tx.store.delete(current.idempotencyKey);
+      }
+    }
+    await tx.done;
     try { window.localStorage.removeItem(LEGACY_KEY); } catch { /* best effort */ }
     return 'indexeddb';
   } catch {
-    try {
-      window.localStorage.setItem(LEGACY_KEY, JSON.stringify(records));
-      return 'localstorage';
-    } catch {
-      return 'memory';
-    }
+    return 'memory';
   }
 }
 
-export async function queueStorageBackend(): Promise<'indexeddb' | 'localstorage' | 'memory'> {
+export async function claimQueueRecord(
+  idempotencyKey: string,
+  owner: string,
+  now: number,
+  leaseMs: number,
+): Promise<StoredQueueRecord | null> {
+  try {
+    const db = await openQueueDb();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const current = await tx.store.get(idempotencyKey);
+    const leaseExpired = Number(current?.leaseExpiresAt ?? 0) <= now;
+    const claimable = current?.status === 'pending'
+      || (current?.status === 'sending' && leaseExpired);
+    if (!current || !claimable) {
+      await tx.done;
+      return null;
+    }
+    const claimed: StoredQueueRecord = {
+      ...current,
+      status: 'sending',
+      leaseOwner: owner,
+      leaseExpiresAt: now + leaseMs,
+    };
+    await tx.store.put(claimed);
+    await tx.done;
+    return claimed;
+  } catch {
+    return null;
+  }
+}
+
+export async function queueStorageBackend(): Promise<'indexeddb' | 'memory'> {
   try {
     await openQueueDb();
     return 'indexeddb';
   } catch {
-    try {
-      const probe = `${LEGACY_KEY}-probe`;
-      window.localStorage.setItem(probe, '1');
-      window.localStorage.removeItem(probe);
-      return 'localstorage';
-    } catch {
-      return 'memory';
-    }
+    return 'memory';
   }
 }

@@ -2,8 +2,11 @@ import { currentUser, requireUserResponse } from '@/lib/auth';
 import { validateCreateSale } from '@/domain/sales/sale-policy';
 import { createSale } from '@/domain/sales/sale-service';
 import { requestId } from '@/infrastructure/logging/structured-logger';
+import { requireCsrf } from '@/lib/csrf';
 
 export async function POST(req: Request) {
+  const csrf = requireCsrf(req);
+  if (csrf) return csrf;
   const user = await currentUser();
   if (!user) return requireUserResponse();
 

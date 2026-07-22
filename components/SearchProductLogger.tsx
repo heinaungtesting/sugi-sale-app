@@ -300,7 +300,7 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
     // out of order. For now we resolve the product id first, then enqueue — this keeps
     // the optimistic sale data accurate and prevents a duplicate quick-add row from
     // racing the log.
-    const res = await fetch('/api/products', {
+    const res = await csrfFetch('/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

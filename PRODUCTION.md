@@ -9,7 +9,7 @@ This app is intended for Sugi staff use on the private Tailscale network.
 - Private direct service: `http://100.111.161.73:3100`
 - Private alternate service: `http://100.111.161.73:8080`
 
-Signed double-submit CSRF protection, origin checking, security headers, and HTTPS on the canonical Tailscale origin are implemented. Do not expose the app to the public internet without stronger edge-backed rate limiting, centralized monitoring/alerting, a public-ingress review, and an incident-response process.
+Signed double-submit CSRF protection is the primary mutation guard. Secondary host validation explicitly allows the MagicDNS hostname, local Tailscale IP, and localhost development hosts; additional hosts require `SUGI_ALLOWED_HOSTS`. Security headers and HTTPS on the canonical Tailscale origin are implemented. Do not expose the app to the public internet without edge rate limiting, centralized monitoring/alerting, a public-ingress review, and an incident-response process.
 
 ## Required environment
 
@@ -149,10 +149,10 @@ If database contents are wrong, restore from backup after code rollback.
 
 ## Known limitations
 
-- Login throttling is in-memory and suitable only for small private/Tailscale use. Use reverse-proxy or Redis-backed rate limiting before public exposure.
+- Login and sale-write throttling use atomic counters in the unlogged PostgreSQL table `sugi_rate_limits`, so limits survive app restarts and coordinate multiple app instances. Public exposure still requires an edge limiter.
 - No per-user audit export yet.
 - No public internet edge-hardening or centralized monitoring yet.
-- `npm audit` currently reports a moderate `postcss` advisory through Next.js; do not run `npm audit fix --force` because it proposes a breaking downgrade path.
+- `npm audit --omit=dev` currently reports one moderate `postcss` advisory and two high `sharp`/libvips advisories through Next.js. The only proposed automated resolution is a breaking downgrade to Next.js 9, so do not run `npm audit fix --force`; upgrade when the Next.js dependency chain publishes a compatible fix.
 
 ## Anti-slow-internet: offline queue + idempotency
 
@@ -163,13 +163,15 @@ Sugi counter taps must succeed even when the store Wi-Fi drops. The app therefor
 - The `sales_logs` table has an `idempotency_key TEXT` column with a partial unique index `(user_id, idempotency_key) WHERE idempotency_key IS NOT NULL`.
 - `POST /api/sales` accepts an optional `idempotency_key` (UUID-like, 8–128 chars, `[A-Za-z0-9_-]`). The route forwards it to `logSale`.
 - `logSale` performs `INSERT ... ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING ...` and falls back to a `SELECT` to replay the original row when the key was already used. The first request wins; mismatched payloads on a duplicate key do **not** mutate the original sale.
-- The `recordSaleWrite` rate budget is charged **only on new inserts**, not on idempotent replays, so a slow network retry cannot starve legitimate new taps.
+- The Postgres-backed sale-write budget is refunded for idempotent replays, so a slow network retry cannot starve legitimate new taps.
 
 ### Client
 
-- `lib/sale-queue.ts` uses IndexedDB (`sugi-sale-queue`) as the primary authenticated queue store. Existing `sugi-sale-queue-v1` localStorage entries are migrated automatically and deleted only after a successful IndexedDB transaction.
+- `lib/sale-queue.ts` uses the Promise-based `idb` wrapper over IndexedDB (`sugi-sale-queue`). Existing `sugi-sale-queue-v1` localStorage entries are read once for migration and deleted only after a successful IndexedDB transaction; new queue writes never use localStorage.
 - A tap is enqueued synchronously (no network wait, no busyId lock on the network) and appears instantly in the home recent list with a temp id.
-- The queue drains in the background with bounded concurrency (2 in-flight) and exponential backoff (`0 → 1.5s → 4s → 9s`, up to 4 attempts) and a 10s per-request timeout.
+- The queue drains oldest-first with one in-flight mutation, preserving tap order, plus exponential backoff (`0 → 1.5s → 4s → 9s`, up to 4 attempts) and a 10s per-request timeout.
+- Page and Service Worker drainers atomically claim each IndexedDB entry with a 90-second owner lease. Active foreign leases cannot be overwritten or deleted; expired leases are recoverable after a crash or tab kill.
+- Every durable enqueue registers `sugi-sale-queue-sync` with the Service Worker Background Sync API. The worker replays IndexedDB entries oldest-first with idempotency and CSRF protection even after the PWA tab closes.
 - Permanent 4xx errors (other than `408` / `429`) skip retries; the entry transitions to `failed` so the user can tap to retry.
 - A 30s `/api/health` probe plus `navigator.onLine` + the `online` / `offline` window events drive the connectivity pill in the header (`オンライン` / `同期中 N件` / `オフライン`).
 - The same queue path is used by `SearchProductLogger` (home), `SalesCalendarClient` (calendar add), and `ProductTapList` (category page).
@@ -177,7 +179,8 @@ Sugi counter taps must succeed even when the store Wi-Fi drops. The app therefor
 
 ### Caveats
 
-- If IndexedDB is unavailable, the queue falls back to localStorage; memory is the final fallback only when the browser blocks both durable stores. Unsynced memory-only taps can be lost when the tab closes.
+- If IndexedDB is unavailable, the queue is memory-only rather than blocking the main thread with synchronous localStorage writes. Unsynced memory-only taps can be lost when the tab closes.
+- Browsers without Background Sync (including current iOS Safari versions) use the existing online/pageshow/health-probe retry path while the PWA is open; they cannot guarantee closed-tab replay because the platform does not provide that API.
 - A cross-tab tap is safe: the server's `(user_id, idempotency_key)` unique index dedupes even if two tabs send the same key. The queue itself uses `BroadcastChannel` to keep the pill in sync across tabs.
 
 ## Active devices and session lifecycle

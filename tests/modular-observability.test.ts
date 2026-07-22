@@ -19,7 +19,8 @@ describe('modular monolith and observability boundaries', () => {
   it('uses IndexedDB as the primary authenticated queue store with legacy migration', () => {
     const store = source('infrastructure/queue/indexeddb-sale-queue-store.ts');
     const queue = source('lib/sale-queue.ts');
-    expect(store).toContain('indexedDB.open');
+    expect(store).toContain("from 'idb'");
+    expect(store).toContain('openDB<SaleQueueDb>');
     expect(store).toContain("createObjectStore(STORE_NAME, { keyPath: 'idempotencyKey' })");
     expect(store).toContain('localStorage.removeItem(LEGACY_KEY)');
     expect(queue).toContain('hydratePersistedQueue');
