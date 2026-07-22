@@ -77,7 +77,7 @@ The health response is the deployment identity. Confirm that `version`, `commit`
 {
   "ok": true,
   "database": "ok",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "commit": "<full-git-commit>",
   "builtAt": "<ISO-8601 timestamp>"
 }

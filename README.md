@@ -4,7 +4,7 @@ Mobile-first, multi-user sales-point logger for Sugi Pharmacy shift work. The pr
 
 ## Current release
 
-- Application version: `1.3.0`
+- Application version: `1.3.1`
 - Runtime: Node.js 22, Next.js 16, React 19, PostgreSQL
 - Canonical private URL: `https://herme-agents.tail71ac56.ts.net`
 - Build identity: `GET /api/health` returns the version, exact Git commit, and build timestamp.
@@ -81,7 +81,7 @@ Deploy a clean, immutable Git tag—not an arbitrary dirty working tree:
 
 ```bash
 git status --short                         # must be empty
-git checkout v1.3.0
+git checkout v1.3.1
 npm ci
 npm test
 npm run build
@@ -95,7 +95,7 @@ The health response must identify the checked-out commit:
 {
   "ok": true,
   "database": "ok",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "commit": "<full-git-commit>",
   "builtAt": "<ISO-8601 timestamp>"
 }

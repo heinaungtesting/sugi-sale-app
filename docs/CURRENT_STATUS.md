@@ -40,7 +40,7 @@ The app currently operates as a **private internal production system over Tailsc
 - **Private/Tailscale internal production:** Operational.
 - **Small colleague pilot:** Supported.
 - **Public internet production:** Not yet recommended without stronger edge controls, monitoring, operational cleanup, and a clean release.
-- **Source control condition:** `v1.2.0` established the reproducible baseline; `v1.3.0` adds modular boundaries, IndexedDB queue persistence, observability, and active-device management.
+- **Source control condition:** `v1.2.0` established the reproducible baseline; `v1.3.1` adds modular boundaries, IndexedDB queue persistence, observability, active-device management, and a PWA cache rollover.
 
 ---
 
@@ -846,7 +846,7 @@ The README was updated for `v1.2.0` to describe visible point values, the authen
 
 ### 14.4 Version identity
 
-`package.json` and `package-lock.json` are aligned at `1.3.0`. The release tag is `v1.3.0`, and `/api/health` exposes the package version, exact commit, and build timestamp.
+`package.json` and `package-lock.json` are aligned at `1.3.1`. The release tag is `v1.3.1`, and `/api/health` exposes the package version, exact commit, and build timestamp.
 
 **Ongoing rule:** Keep package version, tag, and deployed health metadata aligned.
 
