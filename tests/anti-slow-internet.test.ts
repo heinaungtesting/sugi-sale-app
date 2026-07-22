@@ -30,22 +30,22 @@ describe('anti-slow-internet contract', () => {
     });
 
     it('accepts idempotency_key in the sales POST and rejects bad shapes', () => {
-      const route = source('app/api/sales/route.ts');
-      expect(route).toContain('idempotency_key');
-      expect(route).toContain('isValidIdempotencyKey');
-      expect(route).toContain("return Response.json({ error: 'invalid idempotency_key' }");
+      const policy = source('domain/sales/sale-policy.ts');
+      expect(policy).toContain('idempotency_key');
+      expect(policy).toContain('isValidIdempotencyKey');
+      expect(policy).toContain("error: 'invalid idempotency_key'");
     });
 
     it('does not consume the rate-limit budget for idempotent replays', () => {
-      const route = source('app/api/sales/route.ts');
+      const service = source('domain/sales/sale-service.ts');
       // The route must reserve a rate-limit slot before logSale and refund
       // the slot on idempotent replays. This replaces the old
       // "recordSaleWrite conditional on !sale.idempotent_replay" pattern,
       // which inserted the row first and could leave orphan rows in
       // sales_logs when the limit was exceeded (see BUG-001, 2026-06-19).
-      expect(route).toContain('recordSaleWrite(user.id)');
-      expect(route).toContain('releaseSaleWrite');
-      expect(route).toMatch(/sale\.idempotent_replay[\s\S]{0,200}releaseSaleWrite/);
+      expect(service).toContain('reserveSaleWrite(userId)');
+      expect(service).toContain('releaseSaleWrite');
+      expect(service).toMatch(/sale\.idempotent_replay[\s\S]{0,200}releaseSaleWrite/);
     });
 
     it('forwards idempotency_key through the quick-add-and-log path', () => {
@@ -58,12 +58,14 @@ describe('anti-slow-internet contract', () => {
   });
 
   describe('client: persistent offline queue', () => {
-    it('ships a client-only queue module that persists to localStorage', () => {
+    it('ships a client-only queue that persists to IndexedDB and migrates the legacy localStorage queue', () => {
       const q = source('lib/sale-queue.ts');
+      const store = source('infrastructure/queue/indexeddb-sale-queue-store.ts');
       expect(q).toContain("'use client'");
-      expect(q).toContain("sugi-sale-queue-v1");
-      expect(q).toContain("localStorage.getItem(QUEUE_STORAGE_KEY)");
-      expect(q).toContain("localStorage.setItem(QUEUE_STORAGE_KEY");
+      expect(store).toContain("DB_NAME = 'sugi-sale-queue'");
+      expect(store).toContain('indexedDB.open');
+      expect(store).toContain("LEGACY_KEY = 'sugi-sale-queue-v1'");
+      expect(store).toContain('localStorage.removeItem(LEGACY_KEY)');
     });
 
     it('attaches a stable idempotency key (UUID) to every queue entry', () => {

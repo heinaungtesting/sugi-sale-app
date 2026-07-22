@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PageCard } from '@/components/PageCard';
-import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/lib/sugi-domain';
+import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/domain/products/search-ranking';
 import { enqueueSale, getSnapshot, initSaleQueue, pruneSyncedToServerIds, subscribe, type QueueSnapshot } from '@/lib/sale-queue';
 import { buildCalendarCells, monthAnchorDate } from '@/lib/sales-calendar';
 import { mergeDisplayedSales } from '@/lib/sale-display';

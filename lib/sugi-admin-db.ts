@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { pool, query, queryOne } from './db';
 import { normalizeProductCategory } from './sugi-domain';
 import { syncProductPointValue, syncVariantPointValue } from './sugi-point-sync';
+import { revokeUserSessions } from '../repositories/session-repository';
 
 export async function requireAdmin(user: { role: string } | null) {
   return Boolean(user && user.role === 'admin');
@@ -29,9 +30,13 @@ export async function createSugiUser(input: { username: string; display_name: st
 export async function updateSugiUser(input: { id: number; username: string; display_name: string; pin?: string; role: string; is_active: boolean }) {
  if (input.pin) {
  const pin_hash = await bcrypt.hash(input.pin, 10);
- return queryOne(`UPDATE sugi_users SET username=$2, display_name=$3, pin_hash=$4, role=$5, is_active=$6, updated_at=now() WHERE id=$1 RETURNING id`, [input.id, input.username.trim().toLowerCase(), input.display_name.trim(), pin_hash, input.role === 'admin' ? 'admin' : 'user', input.is_active]);
+ const row = await queryOne(`UPDATE sugi_users SET username=$2, display_name=$3, pin_hash=$4, role=$5, is_active=$6, updated_at=now() WHERE id=$1 RETURNING id`, [input.id, input.username.trim().toLowerCase(), input.display_name.trim(), pin_hash, input.role === 'admin' ? 'admin' : 'user', input.is_active]);
+ await revokeUserSessions(input.id);
+ return row;
  }
- return queryOne(`UPDATE sugi_users SET username=$2, display_name=$3, role=$4, is_active=$5, updated_at=now() WHERE id=$1 RETURNING id`, [input.id, input.username.trim().toLowerCase(), input.display_name.trim(), input.role === 'admin' ? 'admin' : 'user', input.is_active]);
+ const row = await queryOne(`UPDATE sugi_users SET username=$2, display_name=$3, role=$4, is_active=$5, updated_at=now() WHERE id=$1 RETURNING id`, [input.id, input.username.trim().toLowerCase(), input.display_name.trim(), input.role === 'admin' ? 'admin' : 'user', input.is_active]);
+ if (!input.is_active) await revokeUserSessions(input.id);
+ return row;
 }
 
 export async function deleteSugiUserForAdmin(id: number, actorId: number) {

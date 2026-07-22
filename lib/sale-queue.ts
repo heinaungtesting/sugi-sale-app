@@ -18,6 +18,8 @@
 // This module is client-only. It must never be imported by server code.
 
 import type { TodaySale } from './sugi-domain';
+import { loadQueueRecords, queueStorageBackend, saveQueueRecords } from '../infrastructure/queue/indexeddb-sale-queue-store';
+import { reportQueueTelemetry } from '../infrastructure/queue/queue-telemetry';
 
 const QUEUE_STORAGE_KEY = 'sugi-sale-queue-v1';
 const HEALTH_PATH = '/api/health';
@@ -44,9 +46,12 @@ export type QueueEntry = {
   /** Cached product metadata for optimistic UI; the server returns the canonical name. */
   productName: string;
   pointValue: number;
+  pointsSnapshot: number;
   quantity: number;
   soldDate?: string | null;
   enqueuedAt: number;
+  occurredAt: string;
+  createdAt: string;
   attempts: number;
   lastError?: string;
   status: QueueStatus;
@@ -61,6 +66,7 @@ export type QueueSnapshot = {
   healthy: boolean;
   pendingCount: number;
   failedCount: number;
+  storageBackend: 'loading' | 'indexeddb' | 'localstorage' | 'memory';
 };
 
 type Subscriber = (snapshot: QueueSnapshot) => void;
@@ -89,6 +95,9 @@ let healthTimer: ReturnType<typeof setInterval> | null = null;
 let staleDrainTimer: ReturnType<typeof setInterval> | null = null;
 let initialized = false;
 let cleanup: (() => void) | null = null;
+let storageBackend: QueueSnapshot['storageBackend'] = 'loading';
+let telemetryTimer: ReturnType<typeof setTimeout> | null = null;
+let lastTelemetryKey = '';
 
 function hasStorage(): boolean {
   try {
@@ -107,48 +116,59 @@ function tokyoSaleDate(epochMs: number): string {
   }).format(new Date(epochMs));
 }
 
+function normalizeRecords(parsed: unknown): QueueEntry[] {
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((raw): raw is Partial<QueueEntry> & Pick<QueueEntry, 'idempotencyKey' | 'productId' | 'productName' | 'status'> => {
+      const e = raw as Partial<QueueEntry>;
+      return !!e
+        && typeof e.idempotencyKey === 'string'
+        && typeof e.productId === 'number'
+        && typeof e.productName === 'string'
+        && (e.status === 'pending' || e.status === 'sending' || e.status === 'synced' || e.status === 'failed');
+    })
+    .map((e) => {
+      const enqueuedAt = Number.isFinite(e.enqueuedAt) ? Number(e.enqueuedAt) : Date.now();
+      const restored: QueueEntry = {
+        ...e,
+        idempotencyKey: e.idempotencyKey,
+        productId: e.productId,
+        variantId: e.variantId ?? null,
+        productName: e.productName,
+        pointValue: Number(e.pointValue ?? e.pointsSnapshot ?? 0),
+        pointsSnapshot: Number(e.pointsSnapshot ?? e.pointValue ?? 0),
+        quantity: Math.max(1, Number(e.quantity ?? 1)),
+        enqueuedAt,
+        soldDate: e.soldDate || tokyoSaleDate(enqueuedAt),
+        occurredAt: e.occurredAt || new Date(enqueuedAt).toISOString(),
+        createdAt: e.createdAt || new Date(enqueuedAt).toISOString(),
+        attempts: Number(e.attempts ?? 0),
+        status: e.status,
+      };
+      return restored.status === 'sending'
+        ? { ...restored, status: 'pending' as const, attempts: Math.max(0, restored.attempts - 1) }
+        : restored;
+    });
+}
+
 function load(): QueueEntry[] {
   if (!hasStorage()) return [];
   try {
     const raw = window.localStorage.getItem(QUEUE_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (e): e is QueueEntry =>
-          !!e &&
-          typeof e.idempotencyKey === 'string' &&
-          typeof e.productId === 'number' &&
-          typeof e.productName === 'string' &&
-          (e.status === 'pending' || e.status === 'sending' || e.status === 'synced' || e.status === 'failed'),
-      )
-      .map((e) => {
-        const enqueuedAt = Number.isFinite(e.enqueuedAt) ? e.enqueuedAt : Date.now();
-        const restored = {
-          ...e,
-          enqueuedAt,
-          // Queues created before tap-date preservation omitted soldDate. Recover it
-          // from the original tap timestamp so an overnight retry stays on that day.
-          soldDate: e.soldDate || tokyoSaleDate(enqueuedAt),
-        };
-        // Anything mid-flight when the tab was killed is back to pending; we will retry.
-        return restored.status === 'sending'
-          ? { ...restored, status: 'pending' as const, attempts: Math.max(0, restored.attempts - 1) }
-          : restored;
-      });
+    return normalizeRecords(raw ? JSON.parse(raw) : []);
   } catch {
     return [];
   }
 }
 
 function persist(): void {
-  if (!hasStorage()) return;
-  try {
-    window.localStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(entries));
-  } catch {
-    // Quota exceeded or private mode. The in-memory queue still works for this session.
-  }
+  if (typeof window === 'undefined') return;
+  void saveQueueRecords(entries).then((backend) => {
+    if (storageBackend !== backend) {
+      storageBackend = backend;
+      emit();
+    }
+  });
 }
 
 function snapshot(): QueueSnapshot {
@@ -165,11 +185,23 @@ function snapshot(): QueueSnapshot {
     healthy,
     pendingCount,
     failedCount,
+    storageBackend,
   };
+}
+
+function reportQueueMetrics(snap: QueueSnapshot): void {
+  const key = `${snap.pendingCount}:${snap.failedCount}:${snap.storageBackend}`;
+  if (key === lastTelemetryKey || telemetryTimer) return;
+  telemetryTimer = setTimeout(() => {
+    telemetryTimer = null;
+    lastTelemetryKey = key;
+    reportQueueTelemetry(snap);
+  }, 1000);
 }
 
 function emit(): void {
   const snap = snapshot();
+  reportQueueMetrics(snap);
   for (const sub of subscribers) {
     try {
       sub(snap);
@@ -184,6 +216,18 @@ function emit(): void {
       // BroadcastChannel postMessage can fail in some sandboxed contexts.
     }
   }
+}
+
+async function hydratePersistedQueue(): Promise<void> {
+  storageBackend = await queueStorageBackend();
+  const persisted = normalizeRecords(await loadQueueRecords());
+  const currentKeys = new Set(entries.map((entry) => entry.idempotencyKey));
+  entries = [...entries, ...persisted.filter((entry) => !currentKeys.has(entry.idempotencyKey))]
+    .sort((a, b) => b.enqueuedAt - a.enqueuedAt)
+    .slice(0, MAX_QUEUE_SIZE);
+  persist();
+  emit();
+  if (online) scheduleDrain(0);
 }
 
 function newIdempotencyKey(): string {
@@ -216,7 +260,10 @@ async function postOnce(entry: QueueEntry): Promise<PostResult> {
   try {
     const res = await fetch('/api/sales', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Queue-Attempt': String(Math.max(1, entry.attempts)),
+      },
       body: JSON.stringify({
         product_id: entry.productId,
         variant_id: entry.variantId ?? undefined,
@@ -377,6 +424,7 @@ export function initSaleQueue(): () => void {
   initialized = true;
 
   entries = load();
+  void hydratePersistedQueue();
   online = typeof navigator === 'undefined' ? true : navigator.onLine;
   healthy = online;
 
@@ -454,6 +502,10 @@ export function initSaleQueue(): () => void {
       }
       bc = null;
     }
+    if (telemetryTimer) {
+      clearTimeout(telemetryTimer);
+      telemetryTimer = null;
+    }
     initialized = false;
   };
   return cleanup;
@@ -492,11 +544,14 @@ export function enqueueSale(input: QueueInput): QueueEntry {
     variantId: input.variantId ?? null,
     productName: input.productName,
     pointValue: Math.max(0, Number(input.pointValue) || 0),
+    pointsSnapshot: Math.max(0, Number(input.pointValue) || 0),
     quantity: Math.max(1, Math.min(99, Math.floor(Number(input.quantity) || 1))),
     // Capture the business date at tap time. The queue may not reach the server until
     // after midnight, especially on iPhone Safari or an unstable store connection.
     soldDate: input.soldDate || tokyoSaleDate(enqueuedAt),
     enqueuedAt,
+    occurredAt: new Date(enqueuedAt).toISOString(),
+    createdAt: new Date(enqueuedAt).toISOString(),
     attempts: 0,
     status: 'pending',
   };
@@ -588,4 +643,6 @@ export function __resetForTests(): void {
   subscribers = new Set();
   initialized = false;
   cleanup = null;
+  storageBackend = 'loading';
+  lastTelemetryKey = '';
 }

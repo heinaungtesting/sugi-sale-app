@@ -51,3 +51,4 @@ ln -sfn "$OUT.sha256" "$BACKUP_DIR/latest.dump.sha256"
 find "$BACKUP_DIR" -type f -name 'sugi-sale-app-*.dump' -mtime +30 -delete
 find "$BACKUP_DIR" -type f -name 'sugi-sale-app-*.dump.sha256' -mtime +30 -delete
 printf 'Backup written and validated: %s\n' "$OUT"
+printf '{"event":"backup_completed","result":"success","archive":"%s","timestamp":"%s"}\n' "$OUT" "$(date --iso-8601=seconds)" | systemd-cat -t sugi-ops -p info || true

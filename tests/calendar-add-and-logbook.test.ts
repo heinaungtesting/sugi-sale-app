@@ -95,7 +95,7 @@ describe('calendar add and full logbook contract', () => {
     expect(db).toContain('month?: string');
     expect(db).toContain("sold_date >= ($3 || '-01')::date");
     expect(db).toContain('ORDER BY sold_date ASC, created_at ASC, id ASC');
-    expect(header).toContain("type ActivePage = 'home' | 'sales' | 'logs' | 'feedback' | 'admin'");
+    expect(header).toContain("type ActivePage = 'home' | 'sales' | 'logs' | 'feedback' | 'sessions' | 'admin'");
     expect(header).toContain('summaryLabel?: string');
     expect(header).toContain('pointsScopeLabel?: string');
   });

@@ -30,7 +30,7 @@ import {
   rankProductsForSearch,
   type ProductVariant,
   type SearchableProduct,
-} from '@/lib/sugi-domain';
+} from '@/domain/products/search-ranking';
 
 type View = 'home' | 'history' | 'settings';
 const staticCatalog = productCatalog as SearchableProduct[];

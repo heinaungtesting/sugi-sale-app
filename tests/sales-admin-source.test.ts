@@ -16,9 +16,11 @@ describe('sales calendar and admin build source contracts', () => {
   it('supports dated sale logging and exact sale deletion by id', () => {
     const db = source('lib/sugi-db.ts');
     const salesRoute = source('app/api/sales/route.ts');
+    const salePolicy = source('domain/sales/sale-policy.ts');
     expect(db).toContain('soldDate?: string | null');
     expect(db).toContain('sold_date, user_id, product_id');
-    expect(salesRoute).toContain('body.sold_date');
+    expect(salesRoute).toContain('validateCreateSale');
+    expect(salePolicy).toContain('input.sold_date');
     expect(existsSync(join(process.cwd(), 'app/api/sales/[id]/route.ts'))).toBe(true);
   });
 

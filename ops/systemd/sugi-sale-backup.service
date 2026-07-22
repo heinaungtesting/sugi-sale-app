@@ -1,6 +1,7 @@
 [Unit]
 Description=Daily Sugi Sale App database backup
 After=sigma-rag-postgres.service
+OnFailure=sugi-ops-alert@%n.service
 
 [Service]
 Type=oneshot

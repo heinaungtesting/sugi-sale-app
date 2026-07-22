@@ -25,7 +25,7 @@ The app currently operates as a **private internal production system over Tailsc
 | Canonical HTTPS health | `ok`; database `ok` |
 | Main service | Active and enabled |
 | Port 8080 service | Active and enabled |
-| Test suite | **224/224 tests passed** across 48 files |
+| Test suite | **231/231 tests passed** across 50 files |
 | Production build | Passed with Next.js 16.2.9 |
 | Active products | **258** |
 | Active product variants | **870** |
@@ -40,7 +40,7 @@ The app currently operates as a **private internal production system over Tailsc
 - **Private/Tailscale internal production:** Operational.
 - **Small colleague pilot:** Supported.
 - **Public internet production:** Not yet recommended without stronger edge controls, monitoring, operational cleanup, and a clean release.
-- **Source control condition:** Release cleanup in progress for `v1.2.0`; production must be deployed only from the resulting clean tag.
+- **Source control condition:** `v1.2.0` established the reproducible baseline; `v1.3.0` adds modular boundaries, IndexedDB queue persistence, observability, and active-device management.
 
 ---
 
@@ -76,6 +76,9 @@ The app records point-product sales quickly enough to use during an actual shift
 - PINs stored as bcrypt hashes, not plaintext.
 - Signed session cookies.
 - Database-backed sessions using unique session IDs (`jti`).
+- Active-device list with last-used time and device/browser description.
+- Individual session revocation and “revoke all other devices.”
+- Automatic expired-session deletion, PIN-change revocation, and a ten-session cap.
 - Logout revokes the active server-side session before deleting the browser cookie.
 - Inactive users cannot continue using the system.
 - Separate `user` and `admin` roles.
@@ -441,7 +444,7 @@ The server-backed logger is designed so a product tap does not wait for the netw
 ### Client queue
 
 - Module: `lib/sale-queue.ts`
-- Persistent localStorage key: `sugi-sale-queue-v1`
+- Primary persistence: IndexedDB database `sugi-sale-queue`; legacy localStorage key `sugi-sale-queue-v1` is migrated automatically.
 - Each tap receives a stable idempotency key.
 - Original tap timestamp is preserved as the Tokyo sale date, including retries after midnight.
 - Maximum queue size: 200.
@@ -468,7 +471,7 @@ The server-backed logger is designed so a product tap does not wait for the netw
 
 ### Remaining queue limitation
 
-If localStorage is unavailable, the queue falls back to memory. Unsynchronized taps can then be lost if the tab closes before connectivity returns.
+If IndexedDB is unavailable, the queue falls back to localStorage. Memory is used only when both durable stores are blocked; unsynchronized memory-only taps can be lost if the tab closes.
 
 ---
 
@@ -760,9 +763,8 @@ The following verification was executed against the current source tree on 2026-
 ### 13.1 Automated tests
 
 ```text
-Test Files: 48 passed (48)
-Tests:      224 passed (224)
-Duration:   14.44s
+Test Files: 50 passed (50)
+Tests:      231 passed (231)
 ```
 
 Coverage areas represented by the suite include:
@@ -844,7 +846,7 @@ The README was updated for `v1.2.0` to describe visible point values, the authen
 
 ### 14.4 Version identity
 
-`package.json` and `package-lock.json` are aligned at `1.2.0`. The release tag is `v1.2.0`, and `/api/health` exposes the package version, exact commit, and build timestamp.
+`package.json` and `package-lock.json` are aligned at `1.3.0`. The release tag is `v1.3.0`, and `/api/health` exposes the package version, exact commit, and build timestamp.
 
 **Ongoing rule:** Keep package version, tag, and deployed health metadata aligned.
 
@@ -902,7 +904,7 @@ Local-only users must export backups manually. There is no server-side recovery 
 2. Define account onboarding/offboarding ownership.
 3. Add a release changelog.
 4. Decide whether `/local` and the authenticated app should remain in one PWA manifest or become explicitly separate install experiences.
-5. Review whether 36 currently active unrevoked sessions is expected for 12 users; revoke stale sessions if not.
+5. Review active devices from `/sessions`; expiry cleanup and the ten-session cap now prevent indefinite accumulation.
 
 ---
 
@@ -910,7 +912,7 @@ Local-only users must export backups manually. There is no server-side recovery 
 
 The next release should not be called complete until all boxes below are checked:
 
-- [x] 224 automated tests pass
+- [x] 231 automated tests pass
 - [x] Next.js production build passes
 - [x] Both systemd services are active
 - [x] Database health is `ok`

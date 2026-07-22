@@ -1,9 +1,11 @@
 import { cookies } from 'next/headers';
 import bcrypt from 'bcryptjs';
-import { query, queryOne } from './db';
+import { queryOne } from './db';
 import { createSessionToken, verifySessionToken, type SessionClaims } from './session-token';
 import { logActivity } from './sugi-activity';
 import type { SessionUser } from './sugi-domain';
+import { describeDevice } from '../infrastructure/auth/device-description';
+import { createSessionRecord, revokeSession, touchSession } from '../repositories/session-repository';
 
 export const SESSION_COOKIE = 'sugi_session';
 export const PIN_POLICY = /^\d{6,}$/;
@@ -55,11 +57,18 @@ export async function loginUser(username: string, pin: string): Promise<SessionU
   return rowToSessionUser(row);
 }
 
-export async function setSession(user: SessionUser): Promise<void> {
+export async function setSession(user: SessionUser, request?: Request): Promise<void> {
   const token = createSessionToken(user, sessionSecret());
   const claims = verifySessionToken(token, sessionSecret());
   if (!claims) throw new Error('created invalid session token');
-  await createSessionRecord(claims);
+  const userAgent = request?.headers.get('user-agent') ?? '';
+  await createSessionRecord({
+    jti: claims.jti,
+    userId: claims.id,
+    expiresAtEpoch: claims.exp,
+    userAgent,
+    deviceLabel: describeDevice(userAgent),
+  });
   void logActivity({ userId: user.id, actorUserId: user.id, action: 'login', summary: 'ログイン', details: { username: user.username } }).catch(() => {});
   const jar = await cookies();
   jar.set(SESSION_COOKIE, token, {
@@ -82,22 +91,6 @@ export async function clearSession(): Promise<void> {
   jar.delete(SESSION_COOKIE);
 }
 
-export async function createSessionRecord(claims: SessionClaims): Promise<void> {
-  await query(
-    `INSERT INTO sugi_sessions (jti, user_id, expires_at)
-     VALUES ($1, $2, to_timestamp($3))
-     ON CONFLICT (jti) DO UPDATE
-     SET user_id = EXCLUDED.user_id,
-         expires_at = EXCLUDED.expires_at,
-         revoked_at = NULL`,
-    [claims.jti, claims.id, claims.exp]
-  );
-}
-
-export async function revokeSession(jti: string): Promise<void> {
-  await query('UPDATE sugi_sessions SET revoked_at = now() WHERE jti = $1', [jti]);
-}
-
 export async function getSessionUserFromClaims(claims: SessionClaims): Promise<SessionUser | null> {
   const row = await queryOne<UserRow>(
     `SELECT u.id, u.username, u.display_name, u.role, u.pin_hash
@@ -111,7 +104,13 @@ export async function getSessionUserFromClaims(claims: SessionClaims): Promise<S
     [claims.id, claims.jti]
   );
   if (!row) return null;
+  await touchSession(claims.jti);
   return rowToSessionUser(row);
+}
+
+export async function currentSessionClaims(): Promise<SessionClaims | null> {
+  const jar = await cookies();
+  return verifySessionToken(jar.get(SESSION_COOKIE)?.value, sessionSecret());
 }
 
 export async function currentUser(): Promise<SessionUser | null> {

@@ -8,7 +8,7 @@ import { csrfFetch } from '@/lib/csrf-client';
 const pawIcon = <span className="paw-icon" aria-hidden="true" />;
 
 type Language = 'en' | 'ja';
-type ActivePage = 'home' | 'sales' | 'logs' | 'feedback' | 'admin';
+type ActivePage = 'home' | 'sales' | 'logs' | 'feedback' | 'sessions' | 'admin';
 
 type Props = {
   user: { displayName: string; role?: string };
@@ -32,6 +32,7 @@ const copy = {
     calendar: 'Calendar',
     logs: 'All logs',
     feedback: 'Feedback',
+    sessions: 'Devices',
     admin: 'Admin',
     todayLogged: 'Today logged',
     items: 'items',
@@ -47,6 +48,7 @@ const copy = {
     calendar: '履歴',
     logs: '全記録',
     feedback: 'ご意見',
+    sessions: '端末',
     admin: '管理',
     todayLogged: '今日の記録',
     items: '点',
@@ -111,6 +113,7 @@ export function AppHeader({ user, totalPoints, totalItems, backHref, language, o
         <a href="/sales" aria-current={activePage === 'sales' ? 'page' : undefined}><span className="nav-pet cat gray" aria-hidden="true" />{t.calendar}</a>
         <a href="/logs" aria-current={activePage === 'logs' ? 'page' : undefined}><span className="nav-pet dog gold" aria-hidden="true" />{t.logs}</a>
         <a href="/feedback" aria-current={activePage === 'feedback' ? 'page' : undefined}><span className="nav-pet cat orange" aria-hidden="true" />{t.feedback}</a>
+        <a href="/sessions" aria-current={activePage === 'sessions' ? 'page' : undefined}><span className="nav-pet cat gray" aria-hidden="true" />{t.sessions}</a>
         {user.role === 'admin' && <a href="/admin" aria-current={activePage === 'admin' ? 'page' : undefined}><span className="nav-pet cat orange" aria-hidden="true" />{t.admin}</a>}
       </nav>
     </>

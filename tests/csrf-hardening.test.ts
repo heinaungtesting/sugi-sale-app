@@ -86,8 +86,8 @@ describe('CSRF hardening', () => {
       expect(text, `${path} must not call requireCsrf`).not.toContain('requireCsrf');
       expect(text, `${path} must still require a logged-in user`).toContain('currentUser()');
     }
-    expect(source('app/api/sales/route.ts')).toContain('recordSaleWrite(user.id)');
-    expect(source('app/api/sales/route.ts')).toContain('isValidIdempotencyKey');
+    expect(source('domain/sales/sale-service.ts')).toContain('reserveSaleWrite(userId)');
+    expect(source('domain/sales/sale-policy.ts')).toContain('isValidIdempotencyKey');
     const productsRoute = source('app/api/products/route.ts');
     const productPost = productsRoute.slice(productsRoute.indexOf('export async function POST'), productsRoute.indexOf('export async function PATCH'));
     const productPatch = productsRoute.slice(productsRoute.indexOf('export async function PATCH'));

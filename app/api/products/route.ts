@@ -2,8 +2,12 @@ import { currentUser, requireUserResponse } from '@/lib/auth';
 import { createQuickProduct, isValidIdempotencyKey, listProductsByCategory, listSearchableProducts, listVisibleProductParents, logSale, updateVisibleProductPoint } from '@/lib/sugi-db';
 import { requireCsrf } from '@/lib/csrf';
 import { logActivity } from '@/lib/sugi-activity';
+import { logEvent, requestId } from '@/infrastructure/logging/structured-logger';
+import { incrementMetric, observeMetric } from '@/infrastructure/observability/metrics';
 
 export async function GET(req: Request) {
+  const started = performance.now();
+  const reqId = requestId(req);
   const user = await currentUser();
   if (!user) return requireUserResponse();
   const url = new URL(req.url);
@@ -12,7 +16,18 @@ export async function GET(req: Request) {
   }
   const search = url.searchParams.get('q');
   if (search !== null) {
-    return Response.json(await listSearchableProducts(user.id, search));
+    try {
+      const products = await listSearchableProducts(user.id, search);
+      const durationMs = performance.now() - started;
+      incrementMetric('search.success');
+      observeMetric('search.duration_ms', durationMs);
+      logEvent('product_search', { requestId: reqId, userId: user.id, durationMs: Math.round(durationMs), resultCount: products.length });
+      return Response.json(products);
+    } catch (error) {
+      incrementMetric('search.failed');
+      logEvent('product_search_failed', { requestId: reqId, userId: user.id, error: error instanceof Error ? error.name : 'unknown' }, 'error');
+      return Response.json({ error: 'search failed' }, { status: 500 });
+    }
   }
   const category = url.searchParams.get('category') ?? 'その他';
   return Response.json(await listProductsByCategory(user.id, category));

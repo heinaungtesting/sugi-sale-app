@@ -77,7 +77,7 @@ The health response is the deployment identity. Confirm that `version`, `commit`
 {
   "ok": true,
   "database": "ok",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "commit": "<full-git-commit>",
   "builtAt": "<ISO-8601 timestamp>"
 }
@@ -167,7 +167,7 @@ Sugi counter taps must succeed even when the store Wi-Fi drops. The app therefor
 
 ### Client
 
-- `lib/sale-queue.ts` is a client-only module that owns a persistent `localStorage` queue (`sugi-sale-queue-v1`).
+- `lib/sale-queue.ts` uses IndexedDB (`sugi-sale-queue`) as the primary authenticated queue store. Existing `sugi-sale-queue-v1` localStorage entries are migrated automatically and deleted only after a successful IndexedDB transaction.
 - A tap is enqueued synchronously (no network wait, no busyId lock on the network) and appears instantly in the home recent list with a temp id.
 - The queue drains in the background with bounded concurrency (2 in-flight) and exponential backoff (`0 → 1.5s → 4s → 9s`, up to 4 attempts) and a 10s per-request timeout.
 - Permanent 4xx errors (other than `408` / `429`) skip retries; the entry transitions to `failed` so the user can tap to retry.
@@ -177,5 +177,22 @@ Sugi counter taps must succeed even when the store Wi-Fi drops. The app therefor
 
 ### Caveats
 
-- The queue uses `localStorage`; private-mode browsers that block it will fall back to in-memory only and lose unsynced taps when the tab is closed. The pill shows an `offline` state in that case so the user knows to keep the tab open.
+- If IndexedDB is unavailable, the queue falls back to localStorage; memory is the final fallback only when the browser blocks both durable stores. Unsynced memory-only taps can be lost when the tab closes.
 - A cross-tab tap is safe: the server's `(user_id, idempotency_key)` unique index dedupes even if two tabs send the same key. The queue itself uses `BroadcastChannel` to keep the pill in sync across tabs.
+
+## Active devices and session lifecycle
+
+- `/sessions` lists the current user's active devices, creation time, and last-used time.
+- Users can revoke one non-current session or all other sessions.
+- Expired sessions are deleted automatically during login/device-list maintenance.
+- PIN changes and account deactivation revoke existing sessions.
+- A user is capped at ten active sessions; the oldest sessions are revoked first.
+
+## Observability and alerts
+
+- Application events are emitted as structured JSON to the systemd journal.
+- Admin-only `GET /api/admin/metrics` reports process counters, queue gauges, and rolling P50/P95 latency.
+- Sale creation, search, login, queue state, database failures, campaign mismatches, backups, and restore verification are tracked.
+- Backup and restore-verification units use `OnFailure=sugi-ops-alert@%n.service`.
+- `scripts/notify-ops-failure.sh` always writes a structured journal alert and optionally sends Telegram when `SUGI_OPS_TELEGRAM_BOT_TOKEN` and `SUGI_OPS_TELEGRAM_CHAT_ID` are configured.
+- Metrics are process-local and reset on restart; this is intentionally lightweight for the private deployment.

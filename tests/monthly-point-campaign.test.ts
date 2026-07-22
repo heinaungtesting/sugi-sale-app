@@ -41,7 +41,8 @@ describe('monthly point campaign staging', () => {
 
     expect(route).toContain('requireAdmin');
     expect(route).toContain('requireCsrf(req)');
-    expect(route).toContain('stageNextMonthPointCampaignFromJson');
+    expect(route).toContain('campaignService.stageNextMonth');
+    expect(source('domain/campaigns/campaign-service.ts')).toContain('stageNextMonthPointCampaignFromJson');
     expect(admin).toContain('/api/admin/point-campaigns/next-month');
     expect(admin).toContain('Stage for next month');
     expect(admin).toContain('current points expire');

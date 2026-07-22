@@ -113,3 +113,5 @@ fi
 
 printf 'Restore verification passed: archive=%s users=%s products=%s sales=%s dangling=%s\n' \
   "$BACKUP_FILE" "$USERS" "$PRODUCTS" "$SALES" "$DANGLING"
+printf '{"event":"restore_verification_completed","result":"success","users":%s,"products":%s,"sales":%s,"dangling":%s,"timestamp":"%s"}\n' \
+  "$USERS" "$PRODUCTS" "$SALES" "$DANGLING" "$(date --iso-8601=seconds)" | systemd-cat -t sugi-ops -p info || true

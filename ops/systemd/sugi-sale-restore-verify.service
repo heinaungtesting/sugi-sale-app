@@ -1,6 +1,7 @@
 [Unit]
 Description=Verify latest Sugi backup by restoring into an isolated temporary database
 After=sugi-sale-backup.service
+OnFailure=sugi-ops-alert@%n.service
 
 [Service]
 Type=oneshot

@@ -30,9 +30,16 @@ async function main() {
       user_id BIGINT NOT NULL REFERENCES sugi_users(id) ON DELETE CASCADE,
       expires_at TIMESTAMPTZ NOT NULL,
       revoked_at TIMESTAMPTZ,
+      last_used_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      user_agent TEXT NOT NULL DEFAULT '',
+      device_label TEXT NOT NULL DEFAULT 'Unknown device',
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `);
+
+  await pool.query(`ALTER TABLE sugi_sessions ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ NOT NULL DEFAULT now()`);
+  await pool.query(`ALTER TABLE sugi_sessions ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT ''`);
+  await pool.query(`ALTER TABLE sugi_sessions ADD COLUMN IF NOT EXISTS device_label TEXT NOT NULL DEFAULT 'Unknown device'`);
 
   await pool.query(`
   CREATE TABLE IF NOT EXISTS sugi_point_campaigns (
@@ -242,6 +249,7 @@ async function main() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sales_logs_user_date ON sales_logs(user_id, sold_date, created_at DESC)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sales_logs_user_product ON sales_logs(user_id, product_id)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sugi_sessions_user_active ON sugi_sessions(user_id, expires_at) WHERE revoked_at IS NULL`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sugi_sessions_user_last_used ON sugi_sessions(user_id, last_used_at DESC) WHERE revoked_at IS NULL`);
 
   await pool.query(`
     UPDATE products

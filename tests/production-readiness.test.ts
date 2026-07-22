@@ -35,7 +35,7 @@ describe('production readiness contract', () => {
     const loginPage = source('app/login/page.tsx');
     expect(loginRoute).toContain('MAX_FAILED_ATTEMPTS');
     expect(loginRoute).toContain('too many login attempts');
-    expect(loginRoute).toContain('await setSession(user)');
+    expect(loginRoute).toContain('await setSession(user, req)');
     expect(loginRoute).toContain('return Response.json({ ok: true, user })');
     expect(loginRoute).not.toContain('sessionTokenForUser');
     expect(loginRoute).not.toContain('token:');

@@ -4,7 +4,7 @@ Mobile-first, multi-user sales-point logger for Sugi Pharmacy shift work. The pr
 
 ## Current release
 
-- Application version: `1.2.0`
+- Application version: `1.3.0`
 - Runtime: Node.js 22, Next.js 16, React 19, PostgreSQL
 - Canonical private URL: `https://herme-agents.tail71ac56.ts.net`
 - Build identity: `GET /api/health` returns the version, exact Git commit, and build timestamp.
@@ -16,7 +16,7 @@ Mobile-first, multi-user sales-point logger for Sugi Pharmacy shift work. The pr
 - Product-family search by product name, alias, variant, and shortcut
 - Visible point values and direct variant buttons
 - Optimistic one-tap sale logging
-- Persistent offline-aware queue with server-side idempotency
+- IndexedDB-backed offline queue with legacy localStorage migration, BroadcastChannel coordination, and server-side idempotency
 - Zero-point assignment before logging
 - Recent-sale quantity, undo, and point correction controls
 - Monthly calendar and current-month logbook
@@ -24,6 +24,8 @@ Mobile-first, multi-user sales-point logger for Sugi Pharmacy shift work. The pr
 - Signed double-submit CSRF protection and role-based admin authorization
 - Daily database backups and weekly isolated restore verification
 - Separate `/local` PWA mode that stores profile, products, and sales only in IndexedDB
+- Active-device management, individual/other-session revocation, expiry cleanup, PIN-change revocation, and a ten-session cap
+- Structured JSON operational logs plus admin-only latency/counter metrics
 
 See [`docs/CURRENT_STATUS.md`](docs/CURRENT_STATUS.md) for the complete feature inventory, architecture, live counts, known limitations, and release gate.
 
@@ -79,7 +81,7 @@ Deploy a clean, immutable Git tag—not an arbitrary dirty working tree:
 
 ```bash
 git status --short                         # must be empty
-git checkout v1.2.0
+git checkout v1.3.0
 npm ci
 npm test
 npm run build
@@ -93,7 +95,7 @@ The health response must identify the checked-out commit:
 {
   "ok": true,
   "database": "ok",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "commit": "<full-git-commit>",
   "builtAt": "<ISO-8601 timestamp>"
 }

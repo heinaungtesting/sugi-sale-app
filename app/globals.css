@@ -3495,3 +3495,12 @@ button:active { transform: scale(.97); }
   .admin-card::before,
   .admin-panel-card::before { width: 34px; height: 34px; opacity: .14; }
 }
+
+.devices-card { display: grid; gap: 1rem; }
+.devices-heading { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+.devices-heading h1 { margin: .2rem 0 0; }
+.device-list { display: grid; gap: .75rem; }
+.device-row { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .9rem; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
+.device-row > div { display: grid; gap: .2rem; }
+.device-row span { color: var(--muted); font-size: .85rem; }
+@media (max-width: 640px) { .devices-heading, .device-row { align-items: stretch; flex-direction: column; } }

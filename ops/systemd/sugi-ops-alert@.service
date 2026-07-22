@@ -1,0 +1,8 @@
+[Unit]
+Description=Sugi operations failure notification for %i
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/hermes/sugi-sale-app
+EnvironmentFile=-/home/hermes/sugi-sale-app/.env.production
+ExecStart=/home/hermes/sugi-sale-app/scripts/notify-ops-failure.sh %i

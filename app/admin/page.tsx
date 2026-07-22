@@ -23,6 +23,7 @@ export default async function AdminPage() {
         className="admin-hero-record-review"
       />
       <a className="admin-feedback-link" href="/admin/feedback">ご意見一覧を確認</a>
+      <a className="admin-feedback-link" href="/api/admin/metrics">運用メトリクス（JSON）</a>
       <AdminClient initialUsers={users as any} initialProducts={products as any} initialActivity={activity as any} />
     </main>
   );
