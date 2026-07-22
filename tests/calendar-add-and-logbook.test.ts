@@ -17,6 +17,23 @@ describe('calendar add and full logbook contract', () => {
     expect(client).not.toContain('showAddProduct');
   });
 
+  it('makes every history-page product reachable without a nested result scroller', () => {
+    const page = source('app/sales/page.tsx');
+    const client = source('components/SalesCalendarClient.tsx');
+    const css = source('app/globals.css');
+    const resultsCss = css.slice(css.indexOf('.calendar-add-results'), css.indexOf('.calendar-add-family'));
+
+    expect(page).toContain("listSearchableProducts(user.id, '', 1000)");
+    expect(client).toContain('ADD_FAMILY_PAGE_SIZE = 12');
+    expect(client).toContain('allAddFamilies');
+    expect(client).toContain('setVisibleFamilyLimit');
+    expect(client).toContain('もっと見る');
+    expect(client).toContain('全{allAddFamilies.length}件');
+    expect(resultsCss).not.toContain('max-height');
+    expect(resultsCss).not.toContain('overflow-y');
+    expect(css).toContain('.calendar-add-more');
+  });
+
   it('shows a top-30 mostly-used product area under the home search bar', () => {
     const page = source('app/page.tsx');
     const logger = source('components/SearchProductLogger.tsx');
@@ -25,6 +42,24 @@ describe('calendar add and full logbook contract', () => {
     expect(logger).toContain('Mostly used');
     expect(logger).toContain('よく使う商品');
     expect(logger).toContain('groupProductsIntoFamilies(rankedPopular, 30)');
+  });
+
+  it('removes history KPIs and lets every selected-day log expand naturally', () => {
+    const page = source('app/sales/page.tsx');
+    const header = source('components/AppHeader.tsx');
+    const css = source('app/globals.css');
+    const logBlocks = [...css.matchAll(/\.sales-log-scroll\s*\{([^}]*)\}/g)].map((match) => match[1]);
+
+    expect(page).toContain('showMetrics={false}');
+    expect(header).toContain('showMetrics?: boolean');
+    expect(header).toContain('showMetrics = true');
+    expect(header).toContain('{showMetrics && (');
+    expect(logBlocks.length).toBeGreaterThan(0);
+    for (const block of logBlocks) {
+      expect(block).not.toMatch(/max-height:\s*\d/);
+      expect(block).not.toContain('overflow-y: auto');
+      expect(block).not.toContain('overscroll-behavior: contain');
+    }
   });
 
   it('adds a same-layer read-only current-month Japanese log page', () => {
@@ -60,7 +95,7 @@ describe('calendar add and full logbook contract', () => {
     expect(db).toContain('month?: string');
     expect(db).toContain("sold_date >= ($3 || '-01')::date");
     expect(db).toContain('ORDER BY sold_date ASC, created_at ASC, id ASC');
-    expect(header).toContain("type ActivePage = 'home' | 'sales' | 'logs' | 'admin'");
+    expect(header).toContain("type ActivePage = 'home' | 'sales' | 'logs' | 'feedback' | 'admin'");
     expect(header).toContain('summaryLabel?: string');
     expect(header).toContain('pointsScopeLabel?: string');
   });

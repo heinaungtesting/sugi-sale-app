@@ -1,7 +1,8 @@
-import { query, queryOne } from './db';
+import { pool, query, queryOne } from './db';
 import { applyDueMonthlyPointCampaigns } from './sugi-admin-db';
 import { applyDefaultProductAliases, categoryLabel, isLoggableProduct, normalizeProductCategory, rankProductsForSearch, type Category, type Product, type SearchableProduct, type TodaySale } from './sugi-domain';
-import { syncProductPointValue, syncVariantPointValueBySaleName } from './sugi-point-sync';
+import { buildQuickProductPlan } from './product-creation';
+import { syncProductPointValue, syncVariantPointValue, syncVariantPointValueBySaleName } from './sugi-point-sync';
 
 export type DatedSale = TodaySale & { sold_date: string; category: string; created_at?: string };
 export type MonthSaleTotal = { sold_date: string; total_points: number; total_items: number };
@@ -48,6 +49,61 @@ export async function listProductsByCategory(userId: number, category: string): 
     [userId, normalized]
   );
   return rows.map((r) => ({ id: Number(r.id), product_name: r.product_name, point_value: Number(r.point_value), category: categoryLabel(r.category), scope: r.user_id === null ? 'global' : 'private' }));
+}
+
+export async function listVisibleProductParents(userId: number): Promise<Product[]> {
+  const rows = await query<{ id: string; product_name: string; point_value: number; category: string | null; user_id: string | null }>(
+    `SELECT id, product_name, point_value, category, user_id
+     FROM products
+     WHERE is_active = TRUE AND (user_id IS NULL OR user_id = $1)
+     ORDER BY product_name`,
+    [userId]
+  );
+  return rows.map((row) => ({
+    id: Number(row.id),
+    product_name: row.product_name,
+    point_value: Number(row.point_value),
+    category: categoryLabel(row.category),
+    scope: row.user_id === null ? 'global' : 'private',
+  }));
+}
+
+export async function updateVisibleProductPoint(
+  userId: number,
+  productId: number,
+  variantId: number | null,
+  pointValue: number,
+) {
+  const points = Math.floor(Number(pointValue));
+  if (!Number.isInteger(userId) || userId <= 0 || !Number.isInteger(productId) || productId <= 0 || !Number.isFinite(points) || points <= 0 || points > 9999) return null;
+
+  if (variantId !== null) {
+    if (!Number.isInteger(variantId) || variantId <= 0) return null;
+    const visibleVariant = await queryOne<{ id: string }>(`
+      SELECT pv.id
+      FROM product_variants pv
+      JOIN products p ON p.id = pv.product_id
+      WHERE p.id = $2
+        AND pv.id = $3
+        AND p.is_active = TRUE
+        AND pv.is_active = TRUE
+        AND (p.user_id IS NULL OR p.user_id = $1)
+      LIMIT 1
+    `, [userId, productId, variantId]);
+    if (!visibleVariant) return null;
+    return syncVariantPointValue(productId, variantId, points);
+  }
+
+  const visibleProduct = await queryOne<{ id: string }>(`
+    SELECT p.id
+    FROM products p
+    WHERE p.id = $2
+      AND p.is_active = TRUE
+      AND (p.user_id IS NULL OR p.user_id = $1)
+    LIMIT 1
+  `, [userId, productId]);
+  if (!visibleProduct) return null;
+  return syncProductPointValue(productId, points);
 }
 
 function rowToProduct(r: {
@@ -127,11 +183,12 @@ export async function listSearchableProducts(userId: number, search = '', limit 
        AND (p.user_id IS NULL OR p.user_id = $1)
        AND (
          $2 = '' OR
-         regexp_replace(lower(p.product_name), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
-         EXISTS (SELECT 1 FROM unnest(COALESCE(p.nicknames, ARRAY[]::text[])) AS nick WHERE regexp_replace(lower(nick), '\\s+', '', 'g') LIKE '%' || $2 || '%') OR
-         regexp_replace(lower(COALESCE(pv.variant_label, '')), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
-         regexp_replace(lower(COALESCE(pv.display_shortcut, '')), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
-         EXISTS (SELECT 1 FROM unnest(COALESCE(pv.nicknames, ARRAY[]::text[])) AS vnick WHERE regexp_replace(lower(vnick), '\\s+', '', 'g') LIKE '%' || $2 || '%')
+         regexp_replace(lower(normalize(p.product_name, NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
+         regexp_replace(lower(normalize(p.product_name || ' ' || COALESCE(pv.variant_label, ''), NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
+         EXISTS (SELECT 1 FROM unnest(COALESCE(p.nicknames, ARRAY[]::text[])) AS nick WHERE regexp_replace(lower(normalize(nick, NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%') OR
+         regexp_replace(lower(normalize(COALESCE(pv.variant_label, ''), NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
+         regexp_replace(lower(normalize(COALESCE(pv.display_shortcut, ''), NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
+         EXISTS (SELECT 1 FROM unnest(COALESCE(pv.nicknames, ARRAY[]::text[])) AS vnick WHERE regexp_replace(lower(normalize(vnick, NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%')
        )
      ORDER BY COALESCE(sc.sale_count, 0) DESC, p.product_name, pv.unit_count NULLS LAST, pv.id
      LIMIT $3`,
@@ -152,11 +209,86 @@ export async function getVisibleProduct(userId: number, productId: number): Prom
   return { id: Number(row.id), product_name: row.product_name, point_value: Number(row.point_value), category: categoryLabel(row.category), scope: row.user_id === null ? 'global' : 'private' };
 }
 
-export async function createQuickProduct(input: { userId: number; productName: string; pointValue: number }): Promise<Product | null> {
-  const name = input.productName.normalize('NFKC').replace(/\s+/g, ' ').trim();
-  const pointValue = Math.floor(Number(input.pointValue));
-  if (name.length < 2 || name.length > 120 || !Number.isFinite(pointValue) || pointValue <= 0 || pointValue > 9999) return null;
-  const aliases = [...new Set([name.toLowerCase(), normalizeSearchParam(name)].filter(Boolean))];
+export type QuickCreatedProduct = Product & { variant_id?: number | null; variant_label?: string | null };
+
+export async function createQuickProduct(input: {
+  userId: number;
+  productName: string;
+  pointValue: number;
+  aliases?: unknown;
+  parentProductId?: number | null;
+  variantLabel?: string | null;
+}): Promise<QuickCreatedProduct | null> {
+  const plan = buildQuickProductPlan(input);
+  if (!plan) return null;
+
+  if (plan.mode === 'variant') {
+    // Once a product has DB variants, the family UI intentionally hides its base row.
+    // Preserve the original base points as a standard variant before adding the first
+    // custom option, so upgrading a main product never makes its old option disappear.
+    await query(
+      `INSERT INTO product_variants
+         (product_id, variant_label, display_shortcut, unit_count, point_value, nicknames, is_active)
+       SELECT p.id, '標準', '標準', 1, p.point_value, p.nicknames, TRUE
+       FROM products p
+       WHERE p.id = $1 AND p.is_active = TRUE AND (p.user_id IS NULL OR p.user_id = $2)
+         AND p.point_value > 0
+         AND NOT EXISTS (
+           SELECT 1 FROM product_variants existing
+           WHERE existing.product_id = p.id AND existing.is_active = TRUE
+         )
+       ON CONFLICT (product_id, variant_label) DO UPDATE SET
+         point_value = EXCLUDED.point_value,
+         nicknames = EXCLUDED.nicknames,
+         is_active = TRUE,
+         updated_at = now()`,
+      [plan.parentProductId, input.userId]
+    );
+
+    const variantRow = await queryOne<{
+      id: string;
+      product_id: string;
+      product_name: string;
+      category: string | null;
+      user_id: string | null;
+      variant_label: string;
+      point_value: number;
+    }>(
+      `INSERT INTO product_variants
+         (product_id, variant_label, display_shortcut, unit_count, point_value, nicknames, is_active)
+       SELECT p.id, $3, NULL, 1, $4, $5, TRUE
+       FROM products p
+       WHERE p.id = $1 AND p.is_active = TRUE AND (p.user_id IS NULL OR p.user_id = $2)
+       ON CONFLICT (product_id, variant_label) DO UPDATE SET
+         point_value = EXCLUDED.point_value,
+         nicknames = (
+           SELECT array(
+             SELECT DISTINCT x
+             FROM unnest(COALESCE(product_variants.nicknames, ARRAY[]::text[]) || EXCLUDED.nicknames) x
+             WHERE x IS NOT NULL AND trim(x) <> ''
+           )
+         ),
+         is_active = TRUE,
+         updated_at = now()
+       RETURNING id, product_id,
+         (SELECT product_name FROM products WHERE id = product_id) AS product_name,
+         (SELECT category FROM products WHERE id = product_id) AS category,
+         (SELECT user_id FROM products WHERE id = product_id) AS user_id,
+         variant_label, point_value`,
+      [plan.parentProductId, input.userId, plan.variantLabel, plan.pointValue, plan.aliases]
+    );
+    if (!variantRow) return null;
+    return {
+      id: Number(variantRow.product_id),
+      product_name: variantRow.product_name,
+      point_value: Number(variantRow.point_value),
+      category: categoryLabel(variantRow.category),
+      scope: variantRow.user_id === null ? 'global' : 'private',
+      variant_id: Number(variantRow.id),
+      variant_label: variantRow.variant_label,
+    };
+  }
+
   const row = await queryOne<{ id: string; product_name: string; point_value: number; category: string | null; user_id: string | null }>(
     `INSERT INTO products (product_name, category, point_value, nicknames, is_active, user_id)
      VALUES ($1, 'ヘルスケア', $2, $3, TRUE, NULL)
@@ -166,7 +298,7 @@ export async function createQuickProduct(input: { userId: number; productName: s
        is_active = TRUE,
        updated_at = now()
      RETURNING id, product_name, point_value, category, user_id`,
-    [name, pointValue, aliases]
+    [plan.productName, plan.pointValue, plan.aliases]
   );
   if (!row) return null;
   return { id: Number(row.id), product_name: row.product_name, point_value: Number(row.point_value), category: categoryLabel(row.category), scope: row.user_id === null ? 'global' : 'private' };
@@ -204,36 +336,68 @@ export async function logSale(
   if (!product || !isLoggableProduct(product)) return null;
   const qty = quantity;
 
-  // If a key is supplied, try to claim it with an idempotent INSERT. A conflict means
-  // an earlier request from the same user already wrote this sale; replay it instead of
-  // creating a duplicate. The first request wins — payload mismatches are not allowed
-  // to mutate the original sale.
+  // Every distinct tap claims its own receipt. The sale row itself is coalesced by
+  // user/date/product, so repeated taps increase quantity while retries remain safe.
   const key = idempotencyKey && isValidIdempotencyKey(idempotencyKey) ? idempotencyKey : null;
   let inserted: TodaySale | null = null;
   let replay = false;
-  if (key) {
-    inserted = await queryOne<TodaySale>(
-      `INSERT INTO sales_logs (sold_date, user_id, product_id, product_name, quantity, points_per_item, idempotency_key)
-       VALUES ($6::date, $1, $2, $3, $4, $5, $7)
-       ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-       RETURNING id, product_name, quantity, points_per_item, total_points`,
-      [userId, product.id, product.product_name, qty, product.point_value, validDate, key],
-    );
-    if (!inserted) {
-      inserted = await queryOne<TodaySale>(
-        `SELECT id, product_name, quantity, points_per_item, total_points
-         FROM sales_logs WHERE user_id = $1 AND idempotency_key = $2 LIMIT 1`,
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (key) {
+      const claimed = await client.query(
+        `INSERT INTO sale_idempotency_receipts (user_id, idempotency_key)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id, idempotency_key) DO NOTHING
+         RETURNING idempotency_key`,
         [userId, key],
       );
-      replay = true;
+      if (claimed.rowCount === 0) {
+        const replayed = await client.query<TodaySale>(
+          `SELECT sale.id, sale.product_name, sale.quantity, sale.points_per_item, sale.total_points
+           FROM sale_idempotency_receipts receipt
+           JOIN sales_logs sale ON sale.id = receipt.sale_id
+           WHERE receipt.user_id = $1 AND receipt.idempotency_key = $2
+           LIMIT 1`,
+          [userId, key],
+        );
+        inserted = replayed.rows[0] ?? null;
+        replay = true;
+      }
     }
-  } else {
-    inserted = await queryOne<TodaySale>(
-      `INSERT INTO sales_logs (sold_date, user_id, product_id, product_name, quantity, points_per_item)
-       VALUES ($6::date, $1, $2, $3, $4, $5)
-       RETURNING id, product_name, quantity, points_per_item, total_points`,
-      [userId, product.id, product.product_name, qty, product.point_value, validDate],
-    );
+
+    if (!replay) {
+      const merged = await client.query<TodaySale>(
+        `INSERT INTO sales_logs (sold_date, user_id, product_id, product_name, quantity, points_per_item, idempotency_key)
+         VALUES ($6::date, $1, $2, $3, $4, $5, $7)
+         ON CONFLICT (user_id, sold_date, product_id, product_name)
+         WHERE user_id IS NOT NULL AND product_id IS NOT NULL
+         DO UPDATE SET
+           quantity = sales_logs.quantity + EXCLUDED.quantity,
+           points_per_item = EXCLUDED.points_per_item,
+           idempotency_key = COALESCE(sales_logs.idempotency_key, EXCLUDED.idempotency_key),
+           created_at = now()
+         RETURNING id, product_name, quantity, points_per_item, total_points`,
+        [userId, product.id, product.product_name, qty, product.point_value, validDate, key],
+      );
+      inserted = merged.rows[0] ?? null;
+      if (key && inserted) {
+        await client.query(
+          `UPDATE sale_idempotency_receipts
+           SET sale_id = $3
+           WHERE user_id = $1 AND idempotency_key = $2`,
+          [userId, key, Number(inserted.id)],
+        );
+      }
+    }
+
+    if (!inserted) throw new Error('sale receipt exists without a sale row');
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
   }
   if (!inserted) return null;
   const today = await todaySummary(userId);

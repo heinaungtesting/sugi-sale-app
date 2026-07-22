@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/lib/sugi-domain';
 import { enqueueSale, type QueueEntry } from '@/lib/sale-queue';
+import { csrfFetch } from '@/lib/csrf-client';
 
 type Language = 'en' | 'ja';
 
@@ -30,12 +31,19 @@ const copy = {
     searchPlaceholder: 'Type hibi, kuchi, fetas, pripink...',
 
     resultsTitle: 'Results',
-    resultsHelp: 'Tap a variant to log ×1.',
+    resultsHelp: 'Tap to log ×1. Long press to change points.',
 
     mostlyUsedTitle: 'Mostly used',
-    noMatchTitle: 'No matching product',
-    noMatchHelp: 'If this is a real recommended product, add it now with its points.',
-    quickAddTitle: 'Quick add product',
+    longPressHelp: 'Long press a product to change its points.',
+    pointEditTitle: 'Change points',
+    assignPointsTitle: 'Set points before logging',
+    assignPointsSave: 'Save & log',
+    unassignedPoints: 'Points not set',
+    pointEditSave: 'Save points',
+    pointEditCancel: 'Cancel',
+    pointEditError: 'Enter points from 1 to 9999.',
+    pointEditSaveError: 'Could not update points.',
+    pointEditSaved: 'Points updated',
     quickAddName: 'Product name',
     quickAddPoints: 'Points',
     quickAddButton: 'Create & log',
@@ -51,12 +59,19 @@ const copy = {
     searchPlaceholder: 'hibi、kuchi、fetas、pripink...',
 
     resultsTitle: '検索結果',
-    resultsHelp: 'バリアントをタップすると×1で記録します。',
+    resultsHelp: 'タップで×1を記録。長押しで点数を変更できます。',
 
     mostlyUsedTitle: 'よく使う商品',
-    noMatchTitle: '商品が見つかりません',
-    noMatchHelp: 'おすすめした商品がDBにない場合、その場で点数を入れて追加できます。',
-    quickAddTitle: '商品をクイック追加',
+    longPressHelp: '商品を長押しすると点数を変更できます。',
+    pointEditTitle: '点数を変更',
+    assignPointsTitle: '記録前に点数を設定',
+    assignPointsSave: '保存して記録',
+    unassignedPoints: '点数未設定',
+    pointEditSave: '点数保存',
+    pointEditCancel: 'キャンセル',
+    pointEditError: '1〜9999の点数を入力してください。',
+    pointEditSaveError: '点数を更新できませんでした。',
+    pointEditSaved: '点数を更新しました',
     quickAddName: '商品名',
     quickAddPoints: '点数',
     quickAddButton: '追加して記録',
@@ -72,6 +87,7 @@ const copy = {
 // stuck touch events firing twice — NOT a network wait. The actual write goes
 // through the offline queue and never blocks the UI.
 const TAP_DEBOUNCE_MS = 250;
+const LONG_PRESS_MS = 550;
 
 function busyKeyFor(variant: ProductVariant) {
   return `${variant.productId}:${variant.variantId ?? 'base'}`;
@@ -107,6 +123,14 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
   const [quickAddName, setQuickAddName] = useState('');
   const [quickAddPoints, setQuickAddPoints] = useState('');
   const [isCreatingProduct, setIsCreatingProduct] = useState(false);
+  const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
+  const [pointEdit, setPointEdit] = useState('');
+  const [pointEditError, setPointEditError] = useState<string | null>(null);
+  const [isSavingPoints, setIsSavingPoints] = useState(false);
+  const [logAfterPointSave, setLogAfterPointSave] = useState(false);
+  const [pointOverrides, setPointOverrides] = useState<Record<string, number>>({});
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggered = useRef(false);
   const t = copy[language];
   const normalizedQuery = query.trim();
   const hasQuery = normalizedQuery.length > 0;
@@ -137,6 +161,10 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
     setQuickAddName(normalizedQuery);
   }, [normalizedQuery]);
 
+  useEffect(() => () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+  }, []);
+
   const families = useMemo(() => {
     if (!hasQuery) return [];
     const ranked = rankProductsForSearch(searchProducts, normalizedQuery, 60);
@@ -148,7 +176,89 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
     return groupProductsIntoFamilies(rankedPopular, 30);
   }, [products]);
 
-  function log(variant: ProductVariant) {
+  function pointValueFor(variant: ProductVariant) {
+    return pointOverrides[busyKeyFor(variant)] ?? variant.pointValue;
+  }
+
+  function cancelLongPress() {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+  }
+
+  function startLongPress(variant: ProductVariant) {
+    cancelLongPress();
+    longPressTriggered.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      setLogAfterPointSave(false);
+      setEditingVariant(variant);
+      setPointEdit(String(pointValueFor(variant)));
+      setPointEditError(null);
+      navigator.vibrate?.(30);
+    }, LONG_PRESS_MS);
+  }
+
+  function closePointEditor() {
+    if (isSavingPoints) return;
+    longPressTriggered.current = false;
+    setLogAfterPointSave(false);
+    setEditingVariant(null);
+    setPointEditError(null);
+  }
+
+  async function saveVariantPoints(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingVariant || isSavingPoints) return;
+    const normalized = pointEdit.normalize('NFKC').trim();
+    const points = Number(normalized);
+    if (!Number.isInteger(points) || points <= 0 || points > 9999) {
+      setPointEditError(t.pointEditError);
+      return;
+    }
+
+    setIsSavingPoints(true);
+    setPointEditError(null);
+    const response = await csrfFetch('/api/products', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_id: editingVariant.productId,
+        variant_id: editingVariant.variantId ?? null,
+        point_value: points,
+      }),
+    }).catch(() => null);
+    setIsSavingPoints(false);
+    if (!response?.ok) {
+      setPointEditError(t.pointEditSaveError);
+      return;
+    }
+
+    const savedVariant = editingVariant;
+    const shouldLog = logAfterPointSave;
+    setPointOverrides((current) => ({ ...current, [busyKeyFor(savedVariant)]: points }));
+    longPressTriggered.current = false;
+    setLogAfterPointSave(false);
+    setEditingVariant(null);
+    if (shouldLog) log(savedVariant, points);
+    else setToast(t.pointEditSaved);
+  }
+
+  function handleVariantClick(variant: ProductVariant) {
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
+    if (pointValueFor(variant) <= 0) {
+      setLogAfterPointSave(true);
+      setEditingVariant(variant);
+      setPointEdit('');
+      setPointEditError(null);
+      return;
+    }
+    log(variant);
+  }
+
+  function log(variant: ProductVariant, assignedPoints?: number) {
     const busyKey = busyKeyFor(variant);
     if (recentlyTapped === busyKey) return;
     setRecentlyTapped(busyKey);
@@ -159,7 +269,7 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
       productId: variant.productId,
       variantId: variant.variantId ?? null,
       productName: variant.productName,
-      pointValue: variant.pointValue,
+      pointValue: assignedPoints ?? pointValueFor(variant),
       quantity: 1,
     });
     const { sale, queueKey } = quickAddEnqueue(entry, language);
@@ -191,9 +301,13 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
     // the optimistic sale data accurate and prevents a duplicate quick-add row from
     // racing the log.
     const res = await fetch('/api/products', {
-    method: 'POST',
+      method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ product_name: name, point_value: points, log: true }),
+      body: JSON.stringify({
+        product_name: name,
+        point_value: points,
+        log: true,
+      }),
     });
     setIsCreatingProduct(false);
     if (!res.ok) {
@@ -256,37 +370,7 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
             </div>
           </div>
           <div className="family-list search-results">
-            {families.length === 0 ? (
-              <div className="recent-empty-state no-product-state quick-add-card">
-                <strong>{t.noMatchTitle}</strong>
-                <span>{t.noMatchHelp}</span>
-                <form className="quick-add-form" onSubmit={quickCreateAndLog}>
-                  <label>
-                    {t.quickAddName}
-                    <input
-                      value={quickAddName}
-                      onChange={(event) => setQuickAddName(event.target.value)}
-                      maxLength={120}
-                      required
-                    />
-                  </label>
-                  <label>
-                    {t.quickAddPoints}
-                    <input
-                      value={quickAddPoints}
-                      onChange={(event) => setQuickAddPoints(event.target.value)}
-                      type="number"
-                      inputMode="numeric"
-                      min="1"
-                      max="9999"
-                      placeholder="120"
-                      required
-                    />
-                  </label>
-                  <button type="submit" disabled={isCreatingProduct}>{t.quickAddButton}</button>
-                </form>
-              </div>
-            ) : families.map((family, index) => (
+            {families.map((family, index) => (
               <section key={family.name} className={`family-card cute-family-card ${index < 2 ? 'featured-family-card' : ''}`.trim()} aria-label={family.name}>
                 <h3>{family.name}</h3>
                 <div className="variant-grid">
@@ -297,18 +381,51 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
                       <button
                         key={busyKey}
                         className="variant-button"
-                        onClick={() => log(variant)}
+                        onPointerDown={() => startLongPress(variant)}
+                        onPointerUp={cancelLongPress}
+                        onPointerLeave={cancelLongPress}
+                        onPointerCancel={cancelLongPress}
+                        onContextMenu={(event) => event.preventDefault()}
+                        onClick={() => handleVariantClick(variant)}
                         disabled={isDebouncing}
-                        title={variant.productName}
+                        title={`${variant.productName} — ${t.longPressHelp}`}
                         aria-busy={isDebouncing}
                       >
-                        {variantDisplayLabel(variant, family, language)}
+                        <span className="variant-label">{variantDisplayLabel(variant, family, language)}</span>
+                        <small className="variant-points">{pointValueFor(variant) > 0 ? `${pointValueFor(variant)}pt` : t.unassignedPoints}</small>
                       </button>
                     );
                   })}
                 </div>
               </section>
             ))}
+            {!isSearching && families.length === 0 && (
+              <form className="quick-add-card quick-add-form" onSubmit={quickCreateAndLog}>
+                <label>
+                  {t.quickAddName}
+                  <input
+                    value={quickAddName}
+                    onChange={(event) => setQuickAddName(event.target.value)}
+                    maxLength={120}
+                    required
+                  />
+                </label>
+                <label>
+                  {t.quickAddPoints}
+                  <input
+                    value={quickAddPoints}
+                    onChange={(event) => setQuickAddPoints(event.target.value)}
+                    type="number"
+                    inputMode="numeric"
+                    min="1"
+                    max="9999"
+                    placeholder="120"
+                    required
+                  />
+                </label>
+                <button type="submit" disabled={isCreatingProduct}>{t.quickAddButton}</button>
+              </form>
+            )}
           </div>
         </>
       ) : (
@@ -316,6 +433,7 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
           <div className="section-heading-row product-grid-heading mostly-used-heading">
             <div>
               <h2><span className="paw-icon" aria-hidden="true" />{t.mostlyUsedTitle}</h2>
+              <p>{t.longPressHelp}</p>
             </div>
           </div>
           <div className="family-list mostly-used-list">
@@ -330,12 +448,18 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
                       <button
                         key={busyKey}
                         className="variant-button"
-                        onClick={() => log(variant)}
+                        onPointerDown={() => startLongPress(variant)}
+                        onPointerUp={cancelLongPress}
+                        onPointerLeave={cancelLongPress}
+                        onPointerCancel={cancelLongPress}
+                        onContextMenu={(event) => event.preventDefault()}
+                        onClick={() => handleVariantClick(variant)}
                         disabled={isDebouncing}
-                        title={variant.productName}
+                        title={`${variant.productName} — ${t.longPressHelp}`}
                         aria-busy={isDebouncing}
                       >
-                        {variantDisplayLabel(variant, family, language)}
+                        <span className="variant-label">{variantDisplayLabel(variant, family, language)}</span>
+                        <small className="variant-points">{pointValueFor(variant) > 0 ? `${pointValueFor(variant)}pt` : t.unassignedPoints}</small>
                       </button>
                     );
                   })}
@@ -344,6 +468,37 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
             ))}
           </div>
         </>
+      )}
+
+      {editingVariant && (
+        <div
+          className="point-editor-overlay"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) closePointEditor();
+          }}
+        >
+          <form className="point-editor-card" role="dialog" aria-modal="true" aria-labelledby="point-editor-title" onSubmit={saveVariantPoints}>
+            <h2 id="point-editor-title">{logAfterPointSave ? t.assignPointsTitle : t.pointEditTitle}</h2>
+            <strong>{editingVariant.productName}</strong>
+            <label htmlFor="variant-point-edit">{t.quickAddPoints}</label>
+            <input
+              id="variant-point-edit"
+              value={pointEdit}
+              onChange={(event) => setPointEdit(event.target.value)}
+              type="text"
+              inputMode="numeric"
+              enterKeyHint="done"
+              autoFocus
+              maxLength={4}
+              aria-invalid={Boolean(pointEditError)}
+            />
+            {pointEditError && <p className="point-editor-error" role="alert">{pointEditError}</p>}
+            <div className="point-editor-actions">
+              <button type="button" className="secondary" onClick={closePointEditor} disabled={isSavingPoints}>{t.pointEditCancel}</button>
+              <button type="submit" disabled={isSavingPoints}>{logAfterPointSave ? t.assignPointsSave : t.pointEditSave}</button>
+            </div>
+          </form>
+        </div>
       )}
 
       {toast && (

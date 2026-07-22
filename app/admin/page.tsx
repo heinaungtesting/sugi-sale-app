@@ -22,6 +22,7 @@ export default async function AdminPage() {
         aria-hidden="true"
         className="admin-hero-record-review"
       />
+      <a className="admin-feedback-link" href="/admin/feedback">ご意見一覧を確認</a>
       <AdminClient initialUsers={users as any} initialProducts={products as any} initialActivity={activity as any} />
     </main>
   );

@@ -21,6 +21,13 @@ describe('production readiness contract', () => {
     expect(health).toContain("SELECT 1 AS ok");
     expect(health).toContain('status: 503');
     expect(health).toContain('database');
+    expect(health).toContain('getBuildInfo');
+    const buildInfo = source('lib/build-info.ts');
+    expect(buildInfo).toContain('public');
+    expect(buildInfo).toContain('build-info.json');
+    const generator = source('scripts/generate-build-info.mjs');
+    expect(generator).toContain("git('rev-parse', 'HEAD')");
+    expect(generator).toContain('builtAt');
   });
 
   it('keeps login sessions in httpOnly cookies and rate-limits failed attempts', () => {
@@ -46,8 +53,8 @@ describe('production readiness contract', () => {
     expect(doc).toContain('/api/health');
   });
 
-  it('ships executable backup and restore scripts', () => {
-    for (const path of ['scripts/backup-db.sh', 'scripts/restore-db.sh']) {
+  it('ships executable backup, restore, and isolated restore-verification scripts', () => {
+    for (const path of ['scripts/backup-db.sh', 'scripts/restore-db.sh', 'scripts/verify-backup-restore.sh']) {
       const fullPath = join(process.cwd(), path);
       expect(existsSync(fullPath)).toBe(true);
       if (process.platform !== 'win32') {
@@ -55,7 +62,30 @@ describe('production readiness contract', () => {
       }
       expect(source(path)).toContain('SIGMA_RAG_PG_DSN');
     }
-    expect(source('scripts/backup-db.sh')).toContain('pg_dump');
-    expect(source('scripts/restore-db.sh')).toContain('TRUNCATE TABLE sales_logs, product_variants, products, sugi_users');
+
+    const backup = source('scripts/backup-db.sh');
+    expect(backup).toContain('pg_dump');
+    expect(backup).toContain('--format=custom');
+    expect(backup).toContain('sha256sum');
+    expect(backup).toContain('latest.dump');
+
+    const restore = source('scripts/restore-db.sh');
+    expect(restore).toContain('TRUNCATE TABLE');
+    expect(restore).toContain('--table=sale_idempotency_receipts');
+    expect(restore).toContain('--table=sugi_point_campaigns');
+
+    const verify = source('scripts/verify-backup-restore.sh');
+    expect(verify).toContain('sugi_restore_verify_');
+    expect(verify).toContain('npm run migrate');
+    expect(verify).toContain('restore-db.sh');
+    expect(verify).toContain('sha256sum -c');
+    expect(verify).toContain('dropdb');
+    expect(verify).toContain('dangling');
+  });
+
+  it('ships daily backup and weekly isolated restore-test systemd units', () => {
+    expect(source('ops/systemd/sugi-sale-backup.timer')).toContain('OnCalendar=*-*-* 03:15:00');
+    expect(source('ops/systemd/sugi-sale-restore-verify.timer')).toContain('OnCalendar=Sun *-*-* 04:30:00');
+    expect(source('ops/systemd/sugi-sale-restore-verify.service')).toContain('verify-backup-restore.sh');
   });
 });

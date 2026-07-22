@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily Sugi Sale App database backup
+After=sigma-rag-postgres.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/hermes/sugi-sale-app
+EnvironmentFile=/home/hermes/sugi-sale-app/.env.production
+ExecStart=/usr/bin/bash /home/hermes/sugi-sale-app/scripts/backup-db.sh

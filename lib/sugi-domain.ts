@@ -99,7 +99,12 @@ function matchScore(product: SearchableProduct, normalizedQuery: string): number
   if (!normalizedQuery) return 1;
   const name = normalizeProductQuery(product.product_name);
   const aliases = (product.aliases ?? []).map(normalizeProductQuery);
-  const candidates = [name, ...aliases];
+  const variantCandidates = [
+    product.variant_label,
+    product.variant_display_shortcut,
+    ...(product.variant_aliases ?? []),
+  ].filter((value): value is string => Boolean(value)).map(normalizeProductQuery);
+  const candidates = [name, ...aliases, ...variantCandidates];
 
   if (candidates.some((value) => value === normalizedQuery)) return 1000;
   if (candidates.some((value) => value.startsWith(normalizedQuery))) return 800;
@@ -110,7 +115,35 @@ function matchScore(product: SearchableProduct, normalizedQuery: string): number
 
 export function rankProductsForSearch(products: SearchableProduct[], query: string, limit?: number): SearchableProduct[] {
   const normalizedQuery = normalizeProductQuery(query);
-  const ranked = products
+  const deduplicated = new Map<string, SearchableProduct>();
+  for (const product of products) {
+    const variantIdentity = normalizeProductQuery(product.variant_label ?? '');
+    const identity = `${normalizeProductQuery(product.product_name)}:${variantIdentity}`;
+    const current = deduplicated.get(identity);
+    if (!current) {
+      deduplicated.set(identity, product);
+      continue;
+    }
+
+    const currentPoints = Number(current.variant_point_value ?? current.point_value);
+    const candidatePoints = Number(product.variant_point_value ?? product.point_value);
+    const currentHasPoints = currentPoints > 0;
+    const candidateHasPoints = candidatePoints > 0;
+    const candidateWins = candidateHasPoints !== currentHasPoints
+      ? candidateHasPoints
+      : candidatePoints !== currentPoints
+        ? candidatePoints > currentPoints
+        : (product.sale_count ?? 0) > (current.sale_count ?? 0);
+    const winner = candidateWins ? product : current;
+    const loser = candidateWins ? current : product;
+    deduplicated.set(identity, {
+      ...winner,
+      aliases: [...new Set([...(winner.aliases ?? []), ...(loser.aliases ?? [])])],
+      variant_aliases: [...new Set([...(winner.variant_aliases ?? []), ...(loser.variant_aliases ?? [])])],
+    });
+  }
+
+  const ranked = [...deduplicated.values()]
     .map((product) => ({ product, score: matchScore(product, normalizedQuery) }))
     .filter((entry) => !normalizedQuery || entry.score > 0)
     .sort((a, b) => {
@@ -194,7 +227,7 @@ export function groupProductsIntoFamilies(products: SearchableProduct[], limit?:
   const families = new Map<string, ProductFamily>();
   const familiesWithDbVariants = new Set(
     products
-      .filter((product) => product.variant_id && Number(product.variant_point_value ?? product.point_value) > 0)
+      .filter((product) => product.variant_id)
       .map((product) => familyNameForProduct(product.product_name))
   );
 
@@ -202,7 +235,6 @@ export function groupProductsIntoFamilies(products: SearchableProduct[], limit?:
     const familyName = familyNameForProduct(product.product_name);
     if (!product.variant_id && familiesWithDbVariants.has(familyName)) continue;
     const pointValue = Number(product.variant_point_value ?? product.point_value);
-    if (!isLoggableProduct({ point_value: pointValue })) continue;
     const family = families.get(familyName) ?? {
       name: familyName,
       aliases: [],
@@ -220,14 +252,26 @@ export function groupProductsIntoFamilies(products: SearchableProduct[], limit?:
     // and render as duplicate cards on the home page.
     const variantKey = `${product.id}:${product.variant_id ?? 'base'}`;
     if (family.variants.some((v) => `${v.productId}:${v.variantId ?? 'base'}` === variantKey)) continue;
-    family.variants.push({
+    const candidate: ProductVariant = {
       productId: product.id,
       variantId: product.variant_id ? Number(product.variant_id) : undefined,
       label: product.variant_display_shortcut?.trim() || (product.variant_label ? displayLabelForDbVariant(product.variant_label) : variantLabelForProduct(product.product_name, familyName)),
       productName: product.product_name,
       pointValue,
       saleCount,
-    });
+    };
+    const duplicateIndex = family.variants.findIndex((variant) => normalizeProductQuery(variant.label) === normalizeProductQuery(candidate.label));
+    if (duplicateIndex >= 0) {
+      const current = family.variants[duplicateIndex];
+      const candidateWins = (candidate.pointValue > 0) !== (current.pointValue > 0)
+        ? candidate.pointValue > 0
+        : candidate.pointValue !== current.pointValue
+          ? candidate.pointValue > current.pointValue
+          : candidate.saleCount > current.saleCount;
+      if (candidateWins) family.variants[duplicateIndex] = candidate;
+    } else {
+      family.variants.push(candidate);
+    }
     families.set(familyName, family);
   }
 

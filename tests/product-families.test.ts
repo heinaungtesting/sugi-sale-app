@@ -37,13 +37,26 @@ describe('product family grouping for main-page variant logger', () => {
     expect(family.variants[0].label).not.toContain('pt');
   });
 
-  it('filters out 0pt variants from tappable family cards', () => {
+  it('keeps 0pt variants visible so Home can ask for points before logging', () => {
     const families = groupProductsIntoFamilies([
       product(1, 'フェイタスZα 7枚', 0),
       product(2, 'フェイタスZα 14枚', 120),
     ]);
 
-    expect(families[0].variants.map((variant) => variant.label)).toEqual(['14枚']);
+    expect(families[0].variants.map((variant) => ({ label: variant.label, pointValue: variant.pointValue }))).toEqual([
+      { label: '7枚', pointValue: 0 },
+      { label: '14枚', pointValue: 120 },
+    ]);
+  });
+
+  it('deduplicates identical family variants and keeps the pointed variant', () => {
+    const families = groupProductsIntoFamilies([
+      product(20, 'ヒビエイド35g', 0, 9),
+      product(21, 'ヒビエイド 35g', 100, 1),
+    ]);
+
+    expect(families[0].variants).toHaveLength(1);
+    expect(families[0].variants[0]).toMatchObject({ productId: 21, pointValue: 100, label: '35g' });
   });
 
   it('orders families by their strongest sale frequency for quick empty-search use', () => {

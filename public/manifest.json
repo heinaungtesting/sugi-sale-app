@@ -1,8 +1,12 @@
 {
   "name": "Sugi Sale Logger",
   "short_name": "SugiLog",
-  "start_url": "/",
+  "id": "/local",
+  "scope": "/",
+  "start_url": "/local",
   "display": "standalone",
+  "lang": "ja",
+  "orientation": "portrait-primary",
   "background_color": "#eef7f4",
   "theme_color": "#0f766e",
   "icons": [

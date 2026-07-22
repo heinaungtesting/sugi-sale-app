@@ -98,6 +98,15 @@ function hasStorage(): boolean {
   }
 }
 
+function tokyoSaleDate(epochMs: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(epochMs));
+}
+
 function load(): QueueEntry[] {
   if (!hasStorage()) return [];
   try {
@@ -114,8 +123,20 @@ function load(): QueueEntry[] {
           typeof e.productName === 'string' &&
           (e.status === 'pending' || e.status === 'sending' || e.status === 'synced' || e.status === 'failed'),
       )
-      // Anything mid-flight when the tab was killed is back to pending; we will retry.
-      .map((e) => (e.status === 'sending' ? { ...e, status: 'pending' as const, attempts: Math.max(0, e.attempts - 1) } : e));
+      .map((e) => {
+        const enqueuedAt = Number.isFinite(e.enqueuedAt) ? e.enqueuedAt : Date.now();
+        const restored = {
+          ...e,
+          enqueuedAt,
+          // Queues created before tap-date preservation omitted soldDate. Recover it
+          // from the original tap timestamp so an overnight retry stays on that day.
+          soldDate: e.soldDate || tokyoSaleDate(enqueuedAt),
+        };
+        // Anything mid-flight when the tab was killed is back to pending; we will retry.
+        return restored.status === 'sending'
+          ? { ...restored, status: 'pending' as const, attempts: Math.max(0, restored.attempts - 1) }
+          : restored;
+      });
   } catch {
     return [];
   }
@@ -452,6 +473,11 @@ export function getSnapshot(): QueueSnapshot {
   return snapshot();
 }
 
+/** Keep a dated view from leaking older queue entries into today's UI. */
+export function entriesForSaleDate(queueEntries: readonly QueueEntry[], soldDate: string): QueueEntry[] {
+  return queueEntries.filter((entry) => entry.soldDate === soldDate);
+}
+
 /**
  * Enqueue a sale for background sync. Returns the optimistic queue entry, which
  * carries a temp id (negative integer) suitable for in-memory UI before the server
@@ -459,6 +485,7 @@ export function getSnapshot(): QueueSnapshot {
  * transitions to `synced`.
  */
 export function enqueueSale(input: QueueInput): QueueEntry {
+  const enqueuedAt = Date.now();
   const entry: QueueEntry = {
     idempotencyKey: newIdempotencyKey(),
     productId: input.productId,
@@ -466,8 +493,10 @@ export function enqueueSale(input: QueueInput): QueueEntry {
     productName: input.productName,
     pointValue: Math.max(0, Number(input.pointValue) || 0),
     quantity: Math.max(1, Math.min(99, Math.floor(Number(input.quantity) || 1))),
-    soldDate: input.soldDate ?? null,
-    enqueuedAt: Date.now(),
+    // Capture the business date at tap time. The queue may not reach the server until
+    // after midnight, especially on iPhone Safari or an unstable store connection.
+    soldDate: input.soldDate || tokyoSaleDate(enqueuedAt),
+    enqueuedAt,
     attempts: 0,
     status: 'pending',
   };

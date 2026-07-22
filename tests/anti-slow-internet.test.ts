@@ -22,10 +22,10 @@ describe('anti-slow-internet contract', () => {
 
     it('writes idempotent logSale with ON CONFLICT and replays the original row', () => {
       const db = source('lib/sugi-db.ts');
-      expect(db).toContain('ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING');
-      expect(db).toContain('SELECT id, product_name, quantity, points_per_item, total_points');
-      expect(db).toContain('FROM sales_logs WHERE user_id = $1 AND idempotency_key = $2 LIMIT 1');
-      expect(db).toContain('idempotent_replay');
+      expect(db).toContain('ON CONFLICT (user_id, idempotency_key) DO NOTHING');
+      expect(db).toContain('FROM sale_idempotency_receipts receipt');
+      expect(db).toContain('JOIN sales_logs sale ON sale.id = receipt.sale_id');
+      expect(db).toContain('idempotent_replay: replay');
       expect(db).toContain("type LoggedSale");
     });
 
@@ -52,7 +52,8 @@ describe('anti-slow-internet contract', () => {
       const route = source('app/api/products/route.ts');
       expect(route).toContain('idempotency_key');
       expect(route).toContain('isValidIdempotencyKey');
-      expect(route).toContain('logSale(user.id, product.id, 1, null, null, idempotencyKey)');
+      expect(route).toContain('product.variant_id ?? null');
+      expect(route).toContain('null, idempotencyKey');
     });
   });
 
@@ -120,7 +121,7 @@ describe('anti-slow-internet contract', () => {
       // its attempt counter is decremented so the user does not lose a retry.
       expect(q).toContain("e.status === 'sending'");
       expect(q).toContain("status: 'pending' as const");
-      expect(q).toContain('attempts: Math.max(0, e.attempts - 1)');
+      expect(q).toContain('attempts: Math.max(0, restored.attempts - 1)');
     });
   });
 
@@ -224,7 +225,8 @@ describe('anti-slow-internet contract', () => {
       const c = source('components/HomeShiftLoggerClient.tsx');
       expect(c).toContain('optimisticPoints');
       expect(c).toContain('optimisticItems');
-      expect(c).toContain('serverToday.total_points + optimisticPoints');
+      expect(c).toContain('syncedTodayPoints + optimisticPoints');
+      expect(c).toContain('syncedTodayItems + optimisticItems');
     });
   });
 

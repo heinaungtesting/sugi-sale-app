@@ -36,6 +36,20 @@ describe('CSRF hardening', () => {
     expect(verifyCsrfRequest(request, 'secret')).toBe(true);
   });
 
+  it('accepts the public HTTPS origin when Next.js runs behind an internal HTTP reverse proxy', () => {
+    const token = createCsrfToken('secret');
+    const request = new Request('http://100.111.161.73:8080/api/feedback', {
+      method: 'POST',
+      headers: {
+        cookie: `sugi_csrf=${token}`,
+        'x-csrf-token': token,
+        host: 'herme-agents.tail71ac56.ts.net',
+        origin: 'https://herme-agents.tail71ac56.ts.net',
+      },
+    });
+    expect(verifyCsrfRequest(request, 'secret')).toBe(true);
+  });
+
   it('rejects missing, mismatched, or cross-origin CSRF requests', () => {
     const token = createCsrfToken('secret');
     const missing = new Request('http://localhost/api/sales', { method: 'POST' });
@@ -64,7 +78,6 @@ describe('CSRF hardening', () => {
   it('exempts frontline sale routes from CSRF so iPhone workflows cannot get stuck', () => {
     for (const path of [
       'app/api/sales/route.ts',
-      'app/api/products/route.ts',
       'app/api/sales/[id]/route.ts',
       'app/api/sales/latest/route.ts',
       'app/api/sales/today/product/route.ts',
@@ -75,7 +88,12 @@ describe('CSRF hardening', () => {
     }
     expect(source('app/api/sales/route.ts')).toContain('recordSaleWrite(user.id)');
     expect(source('app/api/sales/route.ts')).toContain('isValidIdempotencyKey');
-    expect(source('app/api/products/route.ts')).toContain('isValidIdempotencyKey');
+    const productsRoute = source('app/api/products/route.ts');
+    const productPost = productsRoute.slice(productsRoute.indexOf('export async function POST'), productsRoute.indexOf('export async function PATCH'));
+    const productPatch = productsRoute.slice(productsRoute.indexOf('export async function PATCH'));
+    expect(productPost).toContain('isValidIdempotencyKey');
+    expect(productPost).not.toContain('requireCsrf(req)');
+    expect(productPatch).toContain('requireCsrf(req)');
   });
 
   it('frontline today-by-product undo uses Tokyo today, not database CURRENT_DATE', () => {
@@ -98,7 +116,6 @@ describe('CSRF hardening', () => {
 
   it('frontline sale clients use plain fetch because their routes are CSRF-exempt', () => {
     for (const path of [
-      'components/SearchProductLogger.tsx',
       'components/HomeShiftLoggerClient.tsx',
       'components/SalesCalendarClient.tsx',
       'lib/sale-queue.ts',
@@ -106,7 +123,9 @@ describe('CSRF hardening', () => {
       const text = source(path);
       expect(text, `${path} should not use csrfFetch for frontline sale operations`).not.toContain('csrfFetch');
     }
-    expect(source('components/SearchProductLogger.tsx')).toContain("fetch('/api/products'");
+    const logger = source('components/SearchProductLogger.tsx');
+    expect(logger).toContain("fetch('/api/products'");
+    expect(logger).toContain("csrfFetch('/api/products'");
     expect(source('components/HomeShiftLoggerClient.tsx')).toContain('fetch(`/api/sales/${id}`');
     expect(source('components/SalesCalendarClient.tsx')).toContain('fetch(`/api/sales/${id}`');
     expect(source('lib/sale-queue.ts')).toContain("fetch('/api/sales'");

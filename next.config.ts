@@ -22,6 +22,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ['herme-agents.tail71ac56.ts.net'],
   turbopack: {
     root: __dirname,
   },

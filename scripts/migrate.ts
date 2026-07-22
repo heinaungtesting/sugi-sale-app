@@ -1,5 +1,11 @@
 import { Pool } from 'pg';
 import bcrypt from 'bcryptjs';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const connectionString = process.env.SIGMA_RAG_PG_DSN ?? 'postgresql://sigma_rag@127.0.0.1:5433/sigma_rag';
 const pool = new Pool({ connectionString });
@@ -51,6 +57,21 @@ async function main() {
   `);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sugi_activity_logs_created ON sugi_activity_logs(created_at DESC)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_sugi_activity_logs_user ON sugi_activity_logs(user_id, created_at DESC)`);
+
+  await pool.query(`ALTER TABLE sugi_users ADD COLUMN IF NOT EXISTS feedback_prompt_seen_at TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE sugi_users ADD COLUMN IF NOT EXISTS navigation_v9_prompt_seen_at TIMESTAMPTZ`);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sugi_feedback (
+      id BIGSERIAL PRIMARY KEY,
+      user_id BIGINT NOT NULL REFERENCES sugi_users(id) ON DELETE CASCADE,
+      category TEXT NOT NULL CHECK (category IN ('改善案', '不具合', 'その他')),
+      message TEXT NOT NULL CHECK (char_length(message) BETWEEN 10 AND 1000),
+      status TEXT NOT NULL DEFAULT '未確認' CHECK (status IN ('未確認', '確認済み', '対応中', '完了')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sugi_feedback_user_created ON sugi_feedback(user_id, created_at DESC)`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sugi_feedback_status_created ON sugi_feedback(status, created_at DESC)`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS products (
@@ -120,6 +141,84 @@ async function main() {
   // Partial unique index: enforces idempotency for keys that exist, but allows many
   // legacy rows where the column is NULL. The client always sends a key when retrying.
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_sales_logs_user_idem ON sales_logs (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL`);
+
+  // One visible sale row per user/product/day. Separate receipts preserve every tap's
+  // idempotency key even when repeated taps increment that shared row.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sale_idempotency_receipts (
+      user_id BIGINT NOT NULL REFERENCES sugi_users(id) ON DELETE CASCADE,
+      idempotency_key TEXT NOT NULL,
+      sale_id BIGINT REFERENCES sales_logs(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (user_id, idempotency_key)
+    )
+  `);
+  await pool.query(`
+    INSERT INTO sale_idempotency_receipts (user_id, idempotency_key, sale_id, created_at)
+    SELECT user_id, idempotency_key, id, created_at
+    FROM sales_logs
+    WHERE user_id IS NOT NULL AND idempotency_key IS NOT NULL
+    ON CONFLICT (user_id, idempotency_key) DO NOTHING
+  `);
+  await pool.query(`
+    WITH grouped AS (
+      SELECT user_id, sold_date, product_id, product_name, MIN(id) AS keeper_id
+      FROM sales_logs
+      WHERE user_id IS NOT NULL AND product_id IS NOT NULL
+      GROUP BY user_id, sold_date, product_id, product_name
+    )
+    UPDATE sale_idempotency_receipts receipt
+    SET sale_id = grouped.keeper_id
+    FROM sales_logs sale
+    JOIN grouped
+      ON grouped.user_id = sale.user_id
+     AND grouped.sold_date = sale.sold_date
+     AND grouped.product_id = sale.product_id
+     AND grouped.product_name = sale.product_name
+    WHERE receipt.sale_id = sale.id
+  `);
+  await pool.query(`
+    WITH grouped AS (
+      SELECT user_id, sold_date, product_id, product_name,
+             MIN(id) AS keeper_id, SUM(quantity)::int AS merged_quantity
+      FROM sales_logs
+      WHERE user_id IS NOT NULL AND product_id IS NOT NULL
+      GROUP BY user_id, sold_date, product_id, product_name
+    ), latest AS (
+      SELECT DISTINCT ON (user_id, sold_date, product_id, product_name)
+             user_id, sold_date, product_id, product_name, points_per_item, created_at
+      FROM sales_logs
+      WHERE user_id IS NOT NULL AND product_id IS NOT NULL
+      ORDER BY user_id, sold_date, product_id, product_name, created_at DESC, id DESC
+    )
+    UPDATE sales_logs keeper
+    SET quantity = grouped.merged_quantity,
+        points_per_item = latest.points_per_item,
+        created_at = latest.created_at
+    FROM grouped
+    JOIN latest USING (user_id, sold_date, product_id, product_name)
+    WHERE keeper.id = grouped.keeper_id
+  `);
+  await pool.query(`
+    DELETE FROM sales_logs duplicate
+    USING (
+      SELECT user_id, sold_date, product_id, product_name, MIN(id) AS keeper_id
+      FROM sales_logs
+      WHERE user_id IS NOT NULL AND product_id IS NOT NULL
+      GROUP BY user_id, sold_date, product_id, product_name
+    ) grouped
+    WHERE duplicate.user_id = grouped.user_id
+      AND duplicate.sold_date = grouped.sold_date
+      AND duplicate.product_id = grouped.product_id
+      AND duplicate.product_name = grouped.product_name
+      AND duplicate.id <> grouped.keeper_id
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_sales_logs_daily_product
+    ON sales_logs (user_id, sold_date, product_id, product_name)
+    WHERE user_id IS NOT NULL AND product_id IS NOT NULL
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_sale_idempotency_receipts_sale ON sale_idempotency_receipts(sale_id)`);
   await pool.query(`ALTER TABLE product_variants ADD COLUMN IF NOT EXISTS display_shortcut TEXT`);
   await pool.query(`
     UPDATE product_variants
@@ -178,6 +277,12 @@ async function main() {
          updated_at = now()`,
     [username, displayName, pinHash, role]
   );
+
+  // ── Enrichment worker tables (added 2026-07-06) ────────────────────────────
+  const enrichmentSql = await readFile(resolve(__dirname, 'enrich/001_enrichment.sql'), 'utf8');
+  await pool.query(enrichmentSql);
+  // products.source_url is optional; add it lazily.
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS source_url TEXT`);
 
   console.log(`Migration complete. Default login: ${username} / ${pin}`);
 }

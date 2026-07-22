@@ -1,0 +1,10 @@
+[Unit]
+Description=Verify latest Sugi backup by restoring into an isolated temporary database
+After=sugi-sale-backup.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/hermes/sugi-sale-app
+EnvironmentFile=/home/hermes/sugi-sale-app/.env.production
+Environment=PATH=/home/hermes/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/bash /home/hermes/sugi-sale-app/scripts/verify-backup-restore.sh

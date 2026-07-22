@@ -40,4 +40,8 @@ tsconfig.tsbuildinfo
 # local production/state artifacts
 backups/
 tailscale-acl-*.json
+dogfood-output/
+**/__pycache__/
+*.pyc
+public/build-info.json
 

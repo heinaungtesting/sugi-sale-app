@@ -25,6 +25,15 @@ describe('home shift-speed UI contract', () => {
     expect(logger).toContain('if (!hasQuery) return []');
   });
 
+  it('displays each product variant point value below its label on Home', () => {
+    const logger = source('components/SearchProductLogger.tsx');
+    const css = source('app/globals.css');
+    expect(logger.match(/className="variant-points"/g)).toHaveLength(2);
+    expect(logger).toContain('{pointValueFor(variant)}pt');
+    expect(css).toContain('.shift-log-panel .variant-points');
+    expect(css).toMatch(/\.shift-log-panel \.variant-button\s*{[^}]*display:\s*grid/s);
+  });
+
   it('uses sticky search and intentional empty states on the home page', () => {
     const logger = source('components/SearchProductLogger.tsx');
     const client = source('components/HomeShiftLoggerClient.tsx');
@@ -71,6 +80,37 @@ describe('home shift-speed UI contract', () => {
     expect(db).toContain("VALUES ($1, 'ヘルスケア', $2, $3, TRUE, NULL)");
   });
 
+  it('lets users long-press a Home variant to change its points without logging it', () => {
+    const logger = source('components/SearchProductLogger.tsx');
+    const route = source('app/api/products/route.ts');
+    const db = source('lib/sugi-db.ts');
+    const css = source('app/globals.css');
+
+    expect(logger).toContain('LONG_PRESS_MS');
+    expect(logger.match(/onPointerDown=\{\(\) => startLongPress\(variant\)\}/g)).toHaveLength(2);
+    expect(logger).toContain('longPressTriggered.current');
+    expect(logger).toContain("csrfFetch('/api/products'");
+    expect(logger).toContain("method: 'PATCH'");
+    expect(logger).toContain('variant_id: editingVariant.variantId ?? null');
+    expect(logger).toContain('point-editor-overlay');
+    expect(logger).toContain('点数を変更');
+    expect(route).toContain('export async function PATCH');
+    expect(route).toContain('requireCsrf(req)');
+    expect(route).toContain('updateVisibleProductPoint');
+    expect(db).toContain('export async function updateVisibleProductPoint');
+    expect(db).toContain('(p.user_id IS NULL OR p.user_id = $1)');
+    expect(css).toContain('.point-editor-overlay');
+  });
+
+  it('asks for points and then logs when a user taps a 0pt product', () => {
+    const logger = source('components/SearchProductLogger.tsx');
+    expect(logger).toContain('assignPointsTitle');
+    expect(logger).toContain('setLogAfterPointSave(true)');
+    expect(logger).toContain('if (pointValueFor(variant) <= 0)');
+    expect(logger).toContain('log(savedVariant, points)');
+    expect(logger).toContain("setPointEdit('')");
+  });
+
   it('supports quick home-page point correction for wrong product points', () => {
     const client = source('components/HomeShiftLoggerClient.tsx');
     const route = source('app/api/sales/[id]/route.ts');
@@ -102,6 +142,19 @@ describe('home shift-speed UI contract', () => {
     expect(client).toContain("q.status === 'pending' || q.status === 'sending' || q.status === 'failed'");
     expect(client).toContain("_queueStatus: undefined");
     expect(client).not.toContain("_queueStatus: 'synced'");
+  });
+
+  it('shows linlin user 31 a one-time exclusive welcome popup for 3 seconds', () => {
+    const client = source('components/HomeShiftLoggerClient.tsx');
+    const css = source('app/globals.css');
+    expect(client).toContain('LINLIN_WELCOME_USER_ID = 31');
+    expect(client).toContain('sugi-exclusive-welcome-user-31-v1');
+    expect(client).toContain('window.setTimeout(() => setShowLinlinWelcome(false), 3000)');
+    expect(client).toContain('user.id !== LINLIN_WELCOME_USER_ID');
+    expect(client).toContain('linlinさん、ようこそ');
+    expect(client).toContain('exclusive-welcome-popup');
+    expect(css).toContain('.exclusive-welcome-popup');
+    expect(css).toContain('exclusive-welcome-card');
   });
 
   it('removes Home recent rows optimistically after delete and clears stale 404 rows', () => {

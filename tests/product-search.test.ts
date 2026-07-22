@@ -34,4 +34,55 @@ describe('product search ranking', () => {
     const result = rankProductsForSearch(products, 'uv');
     expect(result[0].product_name).toBe('UVトーンアップ ピンク');
   });
+
+  it('removes normalized duplicate rows and keeps the one with points', () => {
+    const duplicates: SearchableProduct[] = [
+      { id: 90, product_name: 'リポソーム ビタミンC', point_value: 0, category: 'ヘルスケア', scope: 'global', aliases: ['vc'], sale_count: 20 },
+      { id: 91, product_name: 'リポソーム　ビタミンＣ', point_value: 250, category: 'ヘルスケア', scope: 'global', aliases: ['vc'], sale_count: 1 },
+    ];
+
+    const result = rankProductsForSearch(duplicates, 'vc');
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ id: 91, point_value: 250 });
+  });
+
+  it('finds a variant by its label even when that label is not duplicated in aliases', () => {
+    const result = rankProductsForSearch([
+      {
+        id: 287,
+        product_name: 'バンテリン サポーター',
+        point_value: 0,
+        category: 'ヘルスケア',
+        scope: 'global',
+        aliases: ['バンテリン'],
+        variant_id: 339,
+        variant_label: 'ひざ S',
+        variant_display_shortcut: 'ひざ S',
+        variant_point_value: 0,
+        variant_aliases: ['S'],
+      },
+    ], 'ひざ S');
+
+    expect(result.map((product) => product.variant_id)).toEqual([339]);
+  });
+
+  it('finds a variant from a combined family and variant query', () => {
+    const result = rankProductsForSearch([
+      {
+        id: 306,
+        product_name: '日本蜂寿',
+        point_value: 0,
+        category: 'ヘルスケア',
+        scope: 'global',
+        aliases: ['蜂寿'],
+        variant_id: 401,
+        variant_label: '粒',
+        variant_display_shortcut: '粒',
+        variant_point_value: 0,
+        variant_aliases: ['粒'],
+      },
+    ], '日本蜂寿 粒');
+
+    expect(result.map((product) => product.variant_id)).toEqual([401]);
+  });
 });

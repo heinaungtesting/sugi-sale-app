@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppHeader } from '@/components/AppHeader';
+import { FeedbackWelcomePopup } from '@/components/FeedbackWelcomePopup';
+import { NavigationChangePopup } from '@/components/NavigationChangePopup';
 import { PageCard } from '@/components/PageCard';
 import { SearchProductLogger } from '@/components/SearchProductLogger';
 import type { SearchableProduct, TodaySale } from '@/lib/sugi-domain';
+import { mergeDisplayedSales } from '@/lib/sale-display';
 import {
+  entriesForSaleDate,
   getSnapshot,
   initSaleQueue,
   pruneSyncedToServerIds,
@@ -20,13 +24,16 @@ import {
 type Language = 'en' | 'ja';
 
 type Props = {
-  user: { displayName: string; role?: string };
+  user: { id: number; displayName: string; role?: string };
   products: SearchableProduct[];
+  todayDate: string;
   today: {
     total_points: number;
     total_items: number;
     recent: TodaySale[];
   };
+  showFeedbackPrompt: boolean;
+  showNavigationPrompt: boolean;
 };
 
 type RecentRow = TodaySale & {
@@ -36,6 +43,8 @@ type RecentRow = TodaySale & {
 };
 
 const LANGUAGE_STORAGE_KEY = 'sugi-language';
+const LINLIN_WELCOME_USER_ID = 31;
+const LINLIN_WELCOME_STORAGE_KEY = 'sugi-exclusive-welcome-user-31-v1';
 
 const copy = {
   en: {
@@ -78,13 +87,14 @@ const copy = {
   },
 } satisfies Record<Language, Record<string, string>>;
 
-export function HomeShiftLoggerClient({ user, products, today }: Props) {
+export function HomeShiftLoggerClient({ user, products, todayDate, today, showFeedbackPrompt, showNavigationPrompt }: Props) {
   const router = useRouter();
   const [language, setLanguage] = useState<Language>('ja');
   const [serverToday, setServerToday] = useState(today);
   const [queueSnapshot, setQueueSnapshot] = useState<QueueSnapshot>(() => getSnapshot());
   const [pointEdits, setPointEdits] = useState<Record<number, string>>({});
   const [pointError, setPointError] = useState<string | null>(null);
+  const [showLinlinWelcome, setShowLinlinWelcome] = useState(false);
   const t = copy[language];
   const seenQueueKeys = useRef<Set<string>>(new Set());
 
@@ -102,6 +112,15 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
     const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY);
     if (saved === 'en' || saved === 'ja') setLanguage(saved);
   }, []);
+
+  useEffect(() => {
+    if (user.id !== LINLIN_WELCOME_USER_ID) return;
+    if (localStorage.getItem(LINLIN_WELCOME_STORAGE_KEY) === 'shown') return;
+    localStorage.setItem(LINLIN_WELCOME_STORAGE_KEY, 'shown');
+    setShowLinlinWelcome(true);
+    const timer = window.setTimeout(() => setShowLinlinWelcome(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [user.id]);
 
   useEffect(() => {
     setServerToday(today);
@@ -122,13 +141,14 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
 
   // Build the merged recent list + display totals from the server data + queue.
   const { recent: displayedRecent, totalPoints, totalItems } = useMemo(() => {
+    const todayQueueEntries = entriesForSaleDate(queueSnapshot.entries, todayDate);
     const serverIdSet = new Set(serverToday.recent.map((r) => Number(r.id)));
-    const temporaryQueueIds = new Set(queueSnapshot.entries.map((e) => -Number(e.enqueuedAt)));
+    const temporaryQueueIds = new Set(todayQueueEntries.map((e) => -Number(e.enqueuedAt)));
     // Start with the server's recent list. Annotate any row that has a matching
     // synced queue entry. Filter out synthetic temp rows injected by setTodaySummary:
     // the queue snapshot renders those same taps with their correct queue status.
     const queueBySaleId = new Map<number, QueueEntry>();
-    for (const e of queueSnapshot.entries) {
+    for (const e of todayQueueEntries) {
       if (e.sale) queueBySaleId.set(Number(e.sale.id), e);
     }
     const rows: RecentRow[] = serverToday.recent
@@ -146,7 +166,9 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
     // pending/sending/failed show as optimistic rows; synced show as the real sale.
     let optimisticPoints = 0;
     let optimisticItems = 0;
-    for (const entry of queueSnapshot.entries) {
+    let syncedTodayPoints = serverToday.total_points;
+    let syncedTodayItems = serverToday.total_items;
+    for (const entry of todayQueueEntries) {
       const already = entry.sale ? serverIdSet.has(Number(entry.sale.id)) : false;
       if (already) continue;
       if (entry.status === 'synced' && entry.sale) {
@@ -159,10 +181,10 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
           _queueKey: entry.idempotencyKey,
           _queueStatus: undefined,
         });
-        // Synced entries get rolled into server totals only on the next page load.
-        // For now add the canonical points/items so the header counter is honest.
-        optimisticPoints += Number(entry.sale.total_points);
-        optimisticItems += Number(entry.sale.quantity);
+        // A repeated tap now returns the same cumulative sale row. Use the largest
+        // authoritative daily totals instead of summing cumulative responses.
+        syncedTodayPoints = Math.max(syncedTodayPoints, Number(entry.sale.today_total));
+        syncedTodayItems = Math.max(syncedTodayItems, Number(entry.sale.today_items));
       } else if (entry.status === 'pending' || entry.status === 'sending' || entry.status === 'failed') {
         const total = entry.pointValue * entry.quantity;
         const tempId = -entry.enqueuedAt;
@@ -182,11 +204,11 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
     }
 
     return {
-      recent: rows.slice(0, 8),
-      totalPoints: serverToday.total_points + optimisticPoints,
-      totalItems: serverToday.total_items + optimisticItems,
+      recent: mergeDisplayedSales(rows).slice(0, 8),
+      totalPoints: syncedTodayPoints + optimisticPoints,
+      totalItems: syncedTodayItems + optimisticItems,
     };
-  }, [serverToday, queueSnapshot]);
+  }, [serverToday, queueSnapshot, todayDate]);
 
   const setTodaySummary = useCallback((sale: TodaySale & { today_total: number; today_items: number }, queueKey: string) => {
     if (seenQueueKeys.current.has(queueKey)) return;
@@ -264,6 +286,17 @@ export function HomeShiftLoggerClient({ user, products, today }: Props) {
 
   return (
     <>
+      <NavigationChangePopup initialOpen={showNavigationPrompt} />
+      <FeedbackWelcomePopup initialOpen={showFeedbackPrompt} />
+      {showLinlinWelcome && (
+        <div className="exclusive-welcome-popup" role="status" aria-live="polite">
+          <div className="exclusive-welcome-card">
+            <span className="exclusive-welcome-badge">Exclusive</span>
+            <strong>linlinさん、ようこそ</strong>
+            <span>今日も一緒にスムーズに記録しましょう。</span>
+          </div>
+        </div>
+      )}
       <AppHeader
         user={user}
         totalPoints={totalPoints}

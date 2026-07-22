@@ -9,7 +9,9 @@ describe('search performance source contract', () => {
     const db = source('lib/sugi-db.ts');
     expect(db).toContain('normalizeSearchParam(search)');
     expect(db).toContain('$2 = \'\' OR');
-    expect(db).toContain('regexp_replace(lower(p.product_name)');
+    expect(db).toContain("regexp_replace(lower(normalize(p.product_name, NFKC))");
+    expect(db).toContain("regexp_replace(lower(normalize(COALESCE(pv.variant_label, ''), NFKC))");
+    expect(db).toContain("normalize(p.product_name || ' ' || COALESCE(pv.variant_label, ''), NFKC)");
     expect(db).toContain('unnest(COALESCE(p.nicknames');
     expect(db).toContain('unnest(COALESCE(pv.nicknames');
     expect(db).toContain('LIMIT $3');

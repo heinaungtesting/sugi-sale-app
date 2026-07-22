@@ -21,12 +21,14 @@ describe('sales page mobile UI source', () => {
     expect(client).toContain('selected-day-pill');
   });
 
-  it('keeps selected-date entries scrollable without product-add drawer complexity', () => {
+  it('expands every selected-date entry without product-add drawer complexity', () => {
     const client = source('components/SalesCalendarClient.tsx');
     const css = source('app/globals.css');
+    const logBlocks = [...css.matchAll(/\.sales-log-scroll\s*\{([^}]*)\}/g)].map((match) => match[1]);
     expect(client).not.toContain('showAddProduct');
     expect(client).not.toContain('sales-add-drawer');
-    expect(css).toMatch(/\.sales-log-scroll\s*{[^}]*overflow-y:\s*auto/s);
+    expect(logBlocks.every((block) => !block.includes('overflow-y: auto'))).toBe(true);
+    expect(logBlocks.every((block) => !/max-height:\s*\d/.test(block))).toBe(true);
     expect(css).not.toContain('sales-add-drawer');
   });
 

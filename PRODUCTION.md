@@ -4,11 +4,12 @@ This app is intended for Sugi staff use on the private Tailscale network.
 
 ## Production URLs
 
-- Primary: `http://100.111.161.73:3100`
-- Alternate: `http://100.111.161.73:8080`
-- Health: `http://100.111.161.73:8080/api/health`
+- Canonical HTTPS: `https://herme-agents.tail71ac56.ts.net`
+- Canonical health: `https://herme-agents.tail71ac56.ts.net/api/health`
+- Private direct service: `http://100.111.161.73:3100`
+- Private alternate service: `http://100.111.161.73:8080`
 
-Do not expose this app to the public internet without adding CSRF protection for write routes, HTTPS, stricter security headers/CSP, stronger edge-backed rate limiting, and monitoring.
+Signed double-submit CSRF protection, origin checking, security headers, and HTTPS on the canonical Tailscale origin are implemented. Do not expose the app to the public internet without stronger edge-backed rate limiting, centralized monitoring/alerting, a public-ingress review, and an incident-response process.
 
 ## Required environment
 
@@ -60,12 +61,29 @@ PIN guidance: use 6 digits minimum. Avoid `1111`, birthdays, or repeated digits.
 ## Deploy / restart
 
 ```bash
+git status --short # must be empty
+git checkout <release-tag>
 npm ci
+npm test
 npm run build
 systemctl --user restart sugi-sale-app.service sugi-sale-app-8080.service
 systemctl --user --no-pager status sugi-sale-app.service sugi-sale-app-8080.service
-curl -fsS http://100.111.161.73:8080/api/health
+curl -fsS https://herme-agents.tail71ac56.ts.net/api/health
 ```
+
+The health response is the deployment identity. Confirm that `version`, `commit`, and `builtAt` match the checked-out release tag before announcing deployment:
+
+```json
+{
+  "ok": true,
+  "database": "ok",
+  "version": "1.2.0",
+  "commit": "<full-git-commit>",
+  "builtAt": "<ISO-8601 timestamp>"
+}
+```
+
+Never deploy from a dirty working tree. A production rollback is only reliable when the running build corresponds to a committed, immutable tag.
 
 ## Backup
 
@@ -133,7 +151,7 @@ If database contents are wrong, restore from backup after code rollback.
 
 - Login throttling is in-memory and suitable only for small private/Tailscale use. Use reverse-proxy or Redis-backed rate limiting before public exposure.
 - No per-user audit export yet.
-- No public internet hardening yet.
+- No public internet edge-hardening or centralized monitoring yet.
 - `npm audit` currently reports a moderate `postcss` advisory through Next.js; do not run `npm audit fix --force` because it proposes a breaking downgrade path.
 
 ## Anti-slow-internet: offline queue + idempotency

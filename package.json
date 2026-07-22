@@ -1,10 +1,11 @@
 {
   "name": "sugi-sale-app",
-  "version": "0.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Mobile-first multi-user Sugi sale logger",
   "scripts": {
     "dev": "next dev -H 0.0.0.0",
+    "prebuild": "node scripts/generate-build-info.mjs",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
     "test": "vitest run",

@@ -52,16 +52,25 @@ function parseCookie(header: string | null, name: string): string | null {
 
 function sameOrigin(req: Request): boolean {
   const url = new URL(req.url);
-  const origin = req.headers.get('origin');
-  if (origin) return origin === url.origin;
-  const referer = req.headers.get('referer');
-  if (referer) {
+  const forwardedHost = req.headers.get('x-forwarded-host')?.split(',')[0]?.trim();
+  const requestHost = forwardedHost || req.headers.get('host')?.trim();
+
+  function matchesRequestOrigin(value: string): boolean {
     try {
-      return new URL(referer).origin === url.origin;
+      const candidate = new URL(value);
+      // Next.js may see the internal HTTP upstream URL while the browser uses the
+      // public HTTPS Tailscale origin. The browser-controlled Host header cannot be
+      // changed cross-origin, so an exact host match safely handles that proxy hop.
+      return candidate.origin === url.origin || Boolean(requestHost && candidate.host === requestHost);
     } catch {
       return false;
     }
   }
+
+  const origin = req.headers.get('origin');
+  if (origin) return matchesRequestOrigin(origin);
+  const referer = req.headers.get('referer');
+  if (referer) return matchesRequestOrigin(referer);
   // Non-browser clients may omit both. Token validation still protects browser CSRF.
   return true;
 }

@@ -5,10 +5,12 @@ import { useRouter } from 'next/navigation';
 import { PageCard } from '@/components/PageCard';
 import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/lib/sugi-domain';
 import { enqueueSale, getSnapshot, initSaleQueue, pruneSyncedToServerIds, subscribe, type QueueSnapshot } from '@/lib/sale-queue';
+import { buildCalendarCells, monthAnchorDate } from '@/lib/sales-calendar';
+import { mergeDisplayedSales } from '@/lib/sale-display';
 
 type MonthTotal = { sold_date: string; total_points: number; total_items: number };
 type SaleLog = { id: number; product_name: string; quantity: number; total_points: number; points_per_item: number; _queueKey?: string };
-type CalendarCell = { date: string; day: number; inMonth: boolean };
+
 
 type Props = {
   products: SearchableProduct[];
@@ -19,6 +21,7 @@ type Props = {
 };
 
 const TAP_DEBOUNCE_MS = 250;
+const ADD_FAMILY_PAGE_SIZE = 12;
 
 function monthLabel(month: string) {
   const [year, m] = month.split('-').map(Number);
@@ -31,27 +34,10 @@ function fullDateLabel(date: string) {
 function tokyoToday() {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 }
-function shiftMonth(month: string, delta: number) {
-  const [year, m] = month.split('-').map(Number);
-  const d = new Date(Date.UTC(year, m - 1 + delta, 1));
-  return d.toISOString().slice(0, 7);
-}
 function shiftDate(date: string, delta: number) {
   const [year, month, day] = date.split('-').map(Number);
   const d = new Date(Date.UTC(year, month - 1, day + delta));
   return d.toISOString().slice(0, 10);
-}
-function calendarCells(month: string): CalendarCell[] {
-  const [year, m] = month.split('-').map(Number);
-  const first = new Date(Date.UTC(year, m - 1, 1));
-  const start = new Date(first);
-  start.setUTCDate(first.getUTCDate() - first.getUTCDay());
-  return Array.from({ length: 35 }, (_, i) => {
-    const d = new Date(start);
-    d.setUTCDate(start.getUTCDate() + i);
-    const date = d.toISOString().slice(0, 10);
-    return { date, day: d.getUTCDate(), inMonth: date.startsWith(month) };
-  });
 }
 
 function variantDisplayLabel(variant: ProductVariant, family: ProductFamily) {
@@ -67,16 +53,19 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
   const [logs, setLogs] = useState(day.logs);
   const [summary, setSummary] = useState({ total_points: day.total_points, total_items: day.total_items });
   const [addQuery, setAddQuery] = useState('');
+  const [visibleFamilyLimit, setVisibleFamilyLimit] = useState(ADD_FAMILY_PAGE_SIZE);
   const [recentlyTapped, setRecentlyTapped] = useState<string | null>(null);
   const [queueSnapshot, setQueueSnapshot] = useState<QueueSnapshot>(() => getSnapshot());
   const totalByDate = useMemo(() => new Map(totals.map((t) => [t.sold_date, t])), [totals]);
-  const cells = useMemo(() => calendarCells(month), [month]);
-  const addFamilies = useMemo(() => {
+  const cells = useMemo(() => buildCalendarCells(month), [month]);
+  const allAddFamilies = useMemo(() => {
     const query = addQuery.trim();
     if (!query) return [];
-    const ranked = rankProductsForSearch(products, query, 40);
-    return groupProductsIntoFamilies(ranked, 8);
+    const ranked = rankProductsForSearch(products, query, products.length);
+    return groupProductsIntoFamilies(ranked, products.length);
   }, [addQuery, products]);
+  const addFamilies = allAddFamilies.slice(0, visibleFamilyLimit);
+  const hiddenFamilyCount = Math.max(0, allAddFamilies.length - addFamilies.length);
 
   useEffect(() => {
     const dispose = initSaleQueue();
@@ -124,7 +113,7 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
         });
       }
     }
-    return merged;
+    return mergeDisplayedSales(merged);
   }, [logs, queueSnapshot, selectedDate]);
 
   async function loadDate(date: string) {
@@ -170,6 +159,7 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
       soldDate: selectedDate,
     });
     setAddQuery('');
+    setVisibleFamilyLimit(ADD_FAMILY_PAGE_SIZE);
     // Pull canonical data shortly after the queue likely lands; the optimistic row
     // gets replaced with the real one once the server response arrives via the
     // queue snapshot subscription.
@@ -187,12 +177,12 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
     <section className="sales-page-v2">
       <PageCard className="sales-calendar-card" aria-label="月間カレンダー">
         <div className="sales-calendar-header">
-          <button className="circle-button" aria-label="前の月" onClick={() => loadMonth(shiftMonth(month, -1))}>‹</button>
+          <button className="circle-button" aria-label="前の月" onClick={() => jumpTo(monthAnchorDate(month, -1))}>‹</button>
           <div className="month-title-block">
             <strong>{monthLabel(month)}</strong>
             <span>日付をタップして記録を確認</span>
           </div>
-          <button className="circle-button" aria-label="次の月" onClick={() => loadMonth(shiftMonth(month, 1))}>›</button>
+          <button className="circle-button" aria-label="次の月" onClick={() => jumpTo(monthAnchorDate(month, 1))}>›</button>
         </div>
         <div className="sales-weekdays" aria-hidden="true">
           <span>日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span>
@@ -232,7 +222,10 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
             id="calendar-add-search"
             className="calendar-add-input"
             value={addQuery}
-            onChange={(event) => setAddQuery(event.target.value)}
+            onChange={(event) => {
+              setAddQuery(event.target.value);
+              setVisibleFamilyLimit(ADD_FAMILY_PAGE_SIZE);
+            }}
             placeholder="商品検索"
             autoCapitalize="none"
             autoCorrect="off"
@@ -240,24 +233,40 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
           />
           {addQuery.trim() && (
             <div className="calendar-add-results">
-              {addFamilies.length === 0 ? (
+              {allAddFamilies.length === 0 ? (
                 <span className="muted">商品が見つかりません</span>
-              ) : addFamilies.map((family) => (
-                <section key={family.name} className="calendar-add-family" aria-label={`${family.name}を追加`}>
-                  <strong>{family.name}</strong>
-                  <div className="calendar-add-variants">
-                    {family.variants.map((variant) => {
-                      const busyKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
-                      const isDebouncing = recentlyTapped === busyKey;
-                      return (
-                        <button key={busyKey} onClick={() => addProductToSelectedDate(variant)} disabled={isDebouncing} title={variant.productName} aria-busy={isDebouncing}>
-                          {variantDisplayLabel(variant, family)}
-                        </button>
-                      );
-                    })}
+              ) : (
+                <>
+                  <div className="calendar-add-result-count" aria-live="polite">
+                    全{allAddFamilies.length}件中 {addFamilies.length}件を表示
                   </div>
-                </section>
-              ))}
+                  {addFamilies.map((family) => (
+                    <section key={family.name} className="calendar-add-family" aria-label={`${family.name}を追加`}>
+                      <strong>{family.name}</strong>
+                      <div className="calendar-add-variants">
+                        {family.variants.map((variant) => {
+                          const busyKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
+                          const isDebouncing = recentlyTapped === busyKey;
+                          return (
+                            <button key={busyKey} onClick={() => addProductToSelectedDate(variant)} disabled={isDebouncing} title={variant.productName} aria-busy={isDebouncing}>
+                              {variantDisplayLabel(variant, family)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  ))}
+                  {hiddenFamilyCount > 0 && (
+                    <button
+                      type="button"
+                      className="calendar-add-more"
+                      onClick={() => setVisibleFamilyLimit((current) => current + ADD_FAMILY_PAGE_SIZE)}
+                    >
+                      もっと見る（残り{hiddenFamilyCount}件）
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>
