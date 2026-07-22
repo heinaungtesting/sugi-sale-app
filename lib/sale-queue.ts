@@ -4,7 +4,7 @@
 //
 // Goals:
 //  - A tap on a variant is registered instantly (optimistic UI) and never blocks on the
-//    network. The tap is stored in a localStorage-backed queue and drained in the
+//    network. The tap is stored in an IndexedDB-backed queue and drained in the
 //    background.
 //  - Every queued entry carries a stable idempotency key. The server deduplicates by
 //    (user_id, idempotency_key), so a retry that succeeds after a previous request
@@ -18,10 +18,10 @@
 // This module is client-only. It must never be imported by server code.
 
 import type { TodaySale } from './sugi-domain';
-import { loadQueueRecords, queueStorageBackend, saveQueueRecords } from '../infrastructure/queue/indexeddb-sale-queue-store';
+import { claimQueueRecord, loadLegacyQueueRecords, loadQueueRecords, queueStorageBackend, saveQueueRecords } from '../infrastructure/queue/indexeddb-sale-queue-store';
 import { reportQueueTelemetry } from '../infrastructure/queue/queue-telemetry';
+import { csrfFetch } from './csrf-client';
 
-const QUEUE_STORAGE_KEY = 'sugi-sale-queue-v1';
 const HEALTH_PATH = '/api/health';
 const HEALTH_INTERVAL_MS = 30 * 1000;
 const HEALTH_TIMEOUT_MS = 4000;
@@ -30,6 +30,9 @@ const MAX_ATTEMPTS = 4;
 const BACKOFF_MS: readonly number[] = [0, 1500, 4000, 9000];
 const MAX_QUEUE_SIZE = 200;
 const BROADCAST_CHANNEL = 'sugi-sale-queue-v1';
+const BACKGROUND_SYNC_TAG = 'sugi-sale-queue-sync';
+const QUEUE_LEASE_MS = 90 * 1000;
+const PAGE_QUEUE_OWNER = `page-${newIdempotencyKey()}`;
 // Re-kick the drain on a short interval if pending entries exist. Without this,
 // a tap that hits a transient permanent error (e.g., one bad CSRF cookie) sits
 // in `pending` until the user taps again. The browser's online event is not
@@ -55,6 +58,8 @@ export type QueueEntry = {
   attempts: number;
   lastError?: string;
   status: QueueStatus;
+  leaseOwner?: string;
+  leaseExpiresAt?: number;
   /** Set when the server has accepted the sale. */
   sale?: TodaySale & { today_total: number; today_items: number; idempotent_replay: boolean };
 };
@@ -66,7 +71,7 @@ export type QueueSnapshot = {
   healthy: boolean;
   pendingCount: number;
   failedCount: number;
-  storageBackend: 'loading' | 'indexeddb' | 'localstorage' | 'memory';
+  storageBackend: 'loading' | 'indexeddb' | 'memory';
 };
 
 type Subscriber = (snapshot: QueueSnapshot) => void;
@@ -99,12 +104,8 @@ let storageBackend: QueueSnapshot['storageBackend'] = 'loading';
 let telemetryTimer: ReturnType<typeof setTimeout> | null = null;
 let lastTelemetryKey = '';
 
-function hasStorage(): boolean {
-  try {
-    return typeof window !== 'undefined' && typeof window.localStorage !== 'undefined';
-  } catch {
-    return false;
-  }
+function hasBrowser(): boolean {
+  return typeof window !== 'undefined';
 }
 
 function tokyoSaleDate(epochMs: number): string {
@@ -145,28 +146,41 @@ function normalizeRecords(parsed: unknown): QueueEntry[] {
         attempts: Number(e.attempts ?? 0),
         status: e.status,
       };
-      return restored.status === 'sending'
+      const leaseExpired = Number(restored.leaseExpiresAt ?? 0) <= Date.now();
+      return restored.status === 'sending' && leaseExpired
         ? { ...restored, status: 'pending' as const, attempts: Math.max(0, restored.attempts - 1) }
         : restored;
     });
 }
 
-function load(): QueueEntry[] {
-  if (!hasStorage()) return [];
+type RegistrationWithSync = ServiceWorkerRegistration & {
+  sync?: { register(tag: string): Promise<void> };
+};
+
+async function registerBackgroundSync(): Promise<void> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
   try {
-    const raw = window.localStorage.getItem(QUEUE_STORAGE_KEY);
-    return normalizeRecords(raw ? JSON.parse(raw) : []);
+    const registration = await navigator.serviceWorker.ready as RegistrationWithSync;
+    if (registration.sync) {
+      await registration.sync.register('sugi-sale-queue-sync');
+    } else {
+      registration.active?.postMessage({ type: 'SYNC_SALES', tag: BACKGROUND_SYNC_TAG });
+    }
   } catch {
-    return [];
+    // Existing online/pageshow/health timers remain the fallback where Background
+    // Sync is unavailable (notably current iOS Safari releases).
   }
 }
 
 function persist(): void {
   if (typeof window === 'undefined') return;
-  void saveQueueRecords(entries).then((backend) => {
+  void saveQueueRecords(entries).then(async (backend) => {
     if (storageBackend !== backend) {
       storageBackend = backend;
       emit();
+    }
+    if (entries.some((entry) => entry.status === 'pending' || entry.status === 'sending')) {
+      await registerBackgroundSync();
     }
   });
 }
@@ -221,8 +235,13 @@ function emit(): void {
 async function hydratePersistedQueue(): Promise<void> {
   storageBackend = await queueStorageBackend();
   const persisted = normalizeRecords(await loadQueueRecords());
-  const currentKeys = new Set(entries.map((entry) => entry.idempotencyKey));
-  entries = [...entries, ...persisted.filter((entry) => !currentKeys.has(entry.idempotencyKey))]
+  // IndexedDB is authoritative for matching keys because the Service Worker may
+  // have advanced an entry to `synced` while the page was suspended.
+  const persistedKeys = new Set(persisted.map((entry) => entry.idempotencyKey));
+  entries = [
+    ...persisted,
+    ...entries.filter((entry) => !persistedKeys.has(entry.idempotencyKey)),
+  ]
     .sort((a, b) => b.enqueuedAt - a.enqueuedAt)
     .slice(0, MAX_QUEUE_SIZE);
   persist();
@@ -258,7 +277,7 @@ async function postOnce(entry: QueueEntry): Promise<PostResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const res = await fetch('/api/sales', {
+    const res = await csrfFetch('/api/sales', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -298,8 +317,19 @@ async function postOnce(entry: QueueEntry): Promise<PostResult> {
 }
 
 async function sendEntry(entry: QueueEntry): Promise<void> {
-  if (entry.status === 'sending' || entry.status === 'synced') return;
-  entry.status = 'sending';
+  if (entry.status === 'synced') return;
+  const claimed = await claimQueueRecord(
+    entry.idempotencyKey,
+    PAGE_QUEUE_OWNER,
+    Date.now(),
+    QUEUE_LEASE_MS,
+  );
+  if (!claimed) {
+    if (storageBackend !== 'memory') return;
+    entry.status = 'sending';
+  } else {
+    Object.assign(entry, claimed);
+  }
   entry.attempts += 1;
   emit();
   persist();
@@ -319,6 +349,8 @@ async function sendEntry(entry: QueueEntry): Promise<void> {
       entry.sale = result.sale;
       entry.status = 'synced';
       entry.lastError = undefined;
+      delete entry.leaseOwner;
+      delete entry.leaseExpiresAt;
       persist();
       emit();
       return;
@@ -333,6 +365,8 @@ async function sendEntry(entry: QueueEntry): Promise<void> {
   entry.status = entry.attempts >= MAX_ATTEMPTS && lastError !== 'invalid csrf token' && lastError !== 'http_404'
     ? 'failed'
     : 'pending';
+  delete entry.leaseOwner;
+  delete entry.leaseExpiresAt;
   persist();
   emit();
 }
@@ -341,21 +375,23 @@ async function drain(): Promise<void> {
   if (draining) return;
   if (!online) {
     // The browser has told us it is offline. Do not attempt sale POSTs here:
-    // keep entries pending in localStorage and wait for the `online` event / health
+    // keep entries pending in IndexedDB and wait for the `online` event / health
     // probe. This is the core counter-safety behavior — taps are recorded locally,
     // but the app must not pretend an offline write reached the server.
     return;
   }
-  const work = entries.filter((e) => e.status === 'pending');
+  const work = entries
+    .filter((e) => e.status === 'pending')
+    .sort((a, b) => a.enqueuedAt - b.enqueuedAt);
   if (work.length === 0) {
     return;
   }
   draining = true;
   emit();
   try {
-    // Bounded concurrency: 2 in-flight at a time keeps the store snappy without
-    // hammering the server when 30 sales were queued.
-    const concurrency = 2;
+    // Preserve tap order. Idempotency prevents duplicates, while one worker prevents
+    // a later queued mutation from overtaking an earlier one.
+    const concurrency = 1;
     let cursor = 0;
     const workers = Array.from({ length: concurrency }, async () => {
       while (cursor < work.length) {
@@ -376,7 +412,7 @@ async function drain(): Promise<void> {
 }
 
 async function probeHealth(): Promise<void> {
-  if (!hasStorage()) return;
+  if (!hasBrowser()) return;
   // navigator.onLine is unreliable on iPhone Safari — a brief flap can leave us
   // stuck in the offline state until the user reloads the tab. Always trust a
   // successful server response over the browser's online flag.
@@ -423,7 +459,9 @@ export function initSaleQueue(): () => void {
   if (initialized) return cleanup ?? (() => undefined);
   initialized = true;
 
-  entries = load();
+  // One-time synchronous compatibility read for queues created before v1.4. Every
+  // ongoing write uses IndexedDB; hydration removes the legacy key after migration.
+  entries = normalizeRecords(loadLegacyQueueRecords());
   void hydratePersistedQueue();
   online = typeof navigator === 'undefined' ? true : navigator.onLine;
   healthy = online;
@@ -455,9 +493,13 @@ export function initSaleQueue(): () => void {
     void probeHealth();
     scheduleDrain(250);
   };
+  const onServiceWorkerMessage = (event: MessageEvent) => {
+    if (event.data?.type === 'SALE_QUEUE_UPDATED') void hydratePersistedQueue();
+  };
   window.addEventListener('online', onOnline);
   window.addEventListener('offline', onOffline);
   window.addEventListener('pageshow', onPageShow);
+  navigator.serviceWorker?.addEventListener('message', onServiceWorkerMessage);
 
   healthTimer = setInterval(() => {
     void probeHealth();
@@ -482,6 +524,7 @@ export function initSaleQueue(): () => void {
     window.removeEventListener('online', onOnline);
     window.removeEventListener('offline', onOffline);
     window.removeEventListener('pageshow', onPageShow);
+    navigator.serviceWorker?.removeEventListener('message', onServiceWorkerMessage);
     if (healthTimer) {
       clearInterval(healthTimer);
       healthTimer = null;
@@ -555,7 +598,7 @@ export function enqueueSale(input: QueueInput): QueueEntry {
     attempts: 0,
     status: 'pending',
   };
-  // Prepend and bound the size so a runaway loop cannot blow past localStorage.
+  // Prepend for newest-first UI display; drainers sort by enqueuedAt before replay.
   entries = [entry, ...entries].slice(0, MAX_QUEUE_SIZE);
   persist();
   emit();

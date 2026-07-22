@@ -63,7 +63,8 @@ describe('anti-slow-internet contract', () => {
       const store = source('infrastructure/queue/indexeddb-sale-queue-store.ts');
       expect(q).toContain("'use client'");
       expect(store).toContain("DB_NAME = 'sugi-sale-queue'");
-      expect(store).toContain('indexedDB.open');
+      expect(store).toContain("from 'idb'");
+      expect(store).toContain('openDB<SaleQueueDb>');
       expect(store).toContain("LEGACY_KEY = 'sugi-sale-queue-v1'");
       expect(store).toContain('localStorage.removeItem(LEGACY_KEY)');
     });
@@ -93,7 +94,8 @@ describe('anti-slow-internet contract', () => {
 
     it('caps concurrent in-flight requests to keep the server responsive', () => {
       const q = source('lib/sale-queue.ts');
-      expect(q).toContain('const concurrency = 2');
+      expect(q).toContain('const concurrency = 1');
+      expect(q).toContain('.sort((a, b) => a.enqueuedAt - b.enqueuedAt)');
       expect(q).toContain('Promise.all(workers)');
     });
 

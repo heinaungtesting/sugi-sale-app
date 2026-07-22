@@ -36,8 +36,10 @@ describe('rate-limit-before-insert (BUG-001 regression)', () => {
     expect(service).toMatch(/catch\s*\(error\)[\s\S]{0,200}releaseSaleWrite/);
   });
 
-  it('keeps the rate budget in infrastructure with a safe decrement', () => {
-    expect(budget).toContain('export function releaseSaleWrite');
-    expect(budget).toMatch(/current\.count\s*[-]=\s*1/);
+  it('keeps the rate budget in shared Postgres infrastructure with an atomic decrement', () => {
+    const postgresBudget = source('infrastructure/rate-limit/postgres-rate-limit.ts');
+    expect(budget).toContain('export async function releaseSaleWrite');
+    expect(postgresBudget).toContain('GREATEST(0, request_count - 1)');
+    expect(postgresBudget).toContain('ON CONFLICT (scope, subject_key)');
   });
 });
