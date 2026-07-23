@@ -11,6 +11,7 @@ const UNSAFE_ROUTES = [
   'app/api/sales/[id]/route.ts',
   'app/api/sales/latest/route.ts',
   'app/api/sales/today/product/route.ts',
+  'app/api/sales/status/route.ts',
   'app/api/products/route.ts',
   'app/api/admin/import/route.ts',
   'app/api/admin/points/route.ts',

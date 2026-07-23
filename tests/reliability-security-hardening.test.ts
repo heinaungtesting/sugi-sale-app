@@ -67,7 +67,7 @@ describe('offline queue durability', () => {
     const queue = source('lib/sale-queue.ts');
     const timerStart = queue.indexOf('staleDrainTimer = setInterval');
     const timerBody = queue.slice(timerStart, timerStart + 500);
-    expect(timerBody).toContain("entries.some((e) => e.status === 'pending' || e.status === 'sending')");
+    expect(timerBody).toContain("entries.some((e) => e.status === 'pending' || e.status === 'sending' || e.status === 'failed')");
     expect(timerBody).toContain('void hydratePersistedQueue()');
   });
 });

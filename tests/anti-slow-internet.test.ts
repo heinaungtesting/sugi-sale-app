@@ -36,6 +36,19 @@ describe('anti-slow-internet contract', () => {
       expect(policy).toContain("error: 'invalid idempotency_key'");
     });
 
+    it('exposes an authenticated receipt-status endpoint for client recovery', () => {
+      const route = source('app/api/sales/status/route.ts');
+      const repository = source('repositories/sale-repository.ts');
+      const queue = source('lib/sale-queue.ts');
+      expect(route).toContain('requireCsrf(req)');
+      expect(route).toContain('currentUser()');
+      expect(route).toContain('findAcceptedByIdempotencyKeys');
+      expect(repository).toContain('sale_idempotency_receipts');
+      expect(repository).toContain('ANY($2::text[])');
+      expect(queue).toContain("csrfFetch('/api/sales/status'");
+      expect(queue).toContain('applyAcceptedSales(entries, body.accepted)');
+    });
+
     it('does not consume the rate-limit budget for idempotent replays', () => {
       const service = source('domain/sales/sale-service.ts');
       // The route must reserve a rate-limit slot before logSale and refund

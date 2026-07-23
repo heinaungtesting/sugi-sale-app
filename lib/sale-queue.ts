@@ -89,6 +89,27 @@ type PostResult =
   | { ok: true; sale: TodaySale & { today_total: number; today_items: number; idempotent_replay: boolean } }
   | { ok: false; error: string; permanent: boolean };
 
+export type AcceptedSaleReceipt = {
+  idempotency_key: string;
+  sale: TodaySale & { today_total: number; today_items: number; idempotent_replay: boolean };
+};
+
+export function applyAcceptedSales(queueEntries: QueueEntry[], accepted: AcceptedSaleReceipt[]): number {
+  const acceptedByKey = new Map(accepted.map((item) => [item.idempotency_key, item.sale]));
+  let changed = 0;
+  for (const entry of queueEntries) {
+    const sale = acceptedByKey.get(entry.idempotencyKey);
+    if (!sale) continue;
+    if (entry.status !== 'synced' || Number(entry.sale?.id) !== Number(sale.id)) changed += 1;
+    entry.status = 'synced';
+    entry.sale = sale;
+    entry.lastError = undefined;
+    delete entry.leaseOwner;
+    delete entry.leaseExpiresAt;
+  }
+  return changed;
+}
+
 let entries: QueueEntry[] = [];
 let online = true;
 let draining = false;
@@ -103,6 +124,7 @@ let cleanup: (() => void) | null = null;
 let storageBackend: QueueSnapshot['storageBackend'] = 'loading';
 let telemetryTimer: ReturnType<typeof setTimeout> | null = null;
 let lastTelemetryKey = '';
+let reconcilingServerReceipts = false;
 
 function hasBrowser(): boolean {
   return typeof window !== 'undefined';
@@ -247,6 +269,31 @@ async function hydratePersistedQueue(): Promise<void> {
   persist();
   emit();
   if (online) scheduleDrain(0);
+}
+
+async function reconcileAcceptedEntries(): Promise<void> {
+  if (reconcilingServerReceipts) return;
+  const active = entries.filter((entry) => entry.status !== 'synced').slice(0, 100);
+  if (active.length === 0) return;
+  reconcilingServerReceipts = true;
+  try {
+    const response = await csrfFetch('/api/sales/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idempotency_keys: active.map((entry) => entry.idempotencyKey) }),
+      cache: 'no-store',
+      credentials: 'same-origin',
+    });
+    if (!response.ok) return;
+    const body = await response.json() as { accepted?: AcceptedSaleReceipt[] };
+    if (!Array.isArray(body.accepted) || applyAcceptedSales(entries, body.accepted) === 0) return;
+    storageBackend = await saveQueueRecords(entries);
+    emit();
+  } catch {
+    // Normal queue retries remain the fallback when receipt reconciliation fails.
+  } finally {
+    reconcilingServerReceipts = false;
+  }
 }
 
 function newIdempotencyKey(): string {
@@ -462,7 +509,7 @@ export function initSaleQueue(): () => void {
   // One-time synchronous compatibility read for queues created before v1.4. Every
   // ongoing write uses IndexedDB; hydration removes the legacy key after migration.
   entries = normalizeRecords(loadLegacyQueueRecords());
-  void hydratePersistedQueue();
+  void hydratePersistedQueue().then(() => reconcileAcceptedEntries());
   online = typeof navigator === 'undefined' ? true : navigator.onLine;
   healthy = online;
 
@@ -494,7 +541,9 @@ export function initSaleQueue(): () => void {
     scheduleDrain(250);
   };
   const onServiceWorkerMessage = (event: MessageEvent) => {
-    if (event.data?.type === 'SALE_QUEUE_UPDATED') void hydratePersistedQueue();
+    if (event.data?.type === 'SALE_QUEUE_UPDATED') {
+      void hydratePersistedQueue().then(() => reconcileAcceptedEntries());
+    }
   };
   window.addEventListener('online', onOnline);
   window.addEventListener('offline', onOffline);
@@ -511,10 +560,10 @@ export function initSaleQueue(): () => void {
   // Safari in particular drops the `online` event after a Wi-Fi flap, so the
   // queue can stay pending forever otherwise.
   staleDrainTimer = setInterval(() => {
-    if (online && entries.some((e) => e.status === 'pending' || e.status === 'sending') && !draining) {
-      // iOS may delay/drop the Service Worker message after background replay.
-      // Re-read authoritative IndexedDB so accepted sales leave the syncing UI.
-      void hydratePersistedQueue();
+    if (online && entries.some((e) => e.status === 'pending' || e.status === 'sending' || e.status === 'failed') && !draining) {
+      // IndexedDB can remain stale after iOS background replay. Confirm exact
+      // idempotency receipts with the server instead of blindly resending forever.
+      void hydratePersistedQueue().then(() => reconcileAcceptedEntries());
     }
   }, STALE_DRAIN_INTERVAL_MS);
 
