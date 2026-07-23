@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'sugi-pwa-v15';
+const CACHE_VERSION = 'sugi-pwa-v16';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const OFFLINE_URL = '/offline';

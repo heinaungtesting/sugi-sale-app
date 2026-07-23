@@ -51,4 +51,32 @@ describe('csrfFetch client retry behavior', () => {
     expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({ method: 'GET' }));
     expect(((fetchMock.mock.calls[2][1] as RequestInit).headers as Headers).get('x-csrf-token')).toBe('fresh-token');
   });
+
+  it('uses the token returned by refresh when document.cookie remains stale', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'invalid csrf token' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      // Installed PWAs can retain a duplicate stale cookie even after Set-Cookie.
+      // The refresh response is therefore the authoritative fresh token.
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, token: 'fresh-signed-token' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { csrfFetch } = await import('../lib/csrf-client');
+    const res = await csrfFetch('/api/products', { method: 'POST', body: '{}' });
+
+    expect(res.ok).toBe(true);
+    expect(cookieValue).toBe('sugi_csrf=stale-token');
+    expect(((fetchMock.mock.calls[2][1] as RequestInit).headers as Headers).get('x-csrf-token')).toBe('fresh-signed-token');
+  });
 });

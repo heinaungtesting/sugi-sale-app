@@ -18,6 +18,8 @@ async function getCsrfToken(forceRefresh = false): Promise<string> {
   if (existing && !forceRefresh) return existing;
   const res = await fetch('/api/auth/csrf', { method: 'GET', cache: 'no-store', credentials: 'same-origin' });
   if (!res.ok) throw new Error('could not issue csrf token');
+  const body = await res.clone().json().catch(() => null) as { token?: unknown } | null;
+  if (typeof body?.token === 'string' && body.token) return body.token;
   const token = readCookie(CSRF_COOKIE);
   if (!token) throw new Error('csrf token cookie missing');
   return token;

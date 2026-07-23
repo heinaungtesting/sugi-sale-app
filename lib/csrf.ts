@@ -41,13 +41,14 @@ function isSignedCsrfToken(token: string | null | undefined, secret = csrfSecret
   return constantEqual(mac, sign(nonce, secret));
 }
 
-function parseCookie(header: string | null, name: string): string | null {
-  if (!header) return null;
+function parseCookies(header: string | null, name: string): string[] {
+  if (!header) return [];
+  const values: string[] = [];
   for (const part of header.split(';')) {
     const [rawKey, ...rest] = part.trim().split('=');
-    if (rawKey === name) return decodeURIComponent(rest.join('='));
+    if (rawKey === name) values.push(decodeURIComponent(rest.join('=')));
   }
-  return null;
+  return values;
 }
 
 const DEFAULT_ALLOWED_HOSTS = new Set([
@@ -94,11 +95,11 @@ export function verifyCsrfRequest(req: Request, secret = csrfSecret()): boolean 
   // The signed double-submit token is the primary CSRF control. Host validation is
   // deliberately secondary so Tailscale proxy scheme/port changes cannot silently
   // break valid devices.
-  const cookieToken = parseCookie(req.headers.get('cookie'), CSRF_COOKIE);
+  const cookieTokens = parseCookies(req.headers.get('cookie'), CSRF_COOKIE);
   const headerToken = req.headers.get(CSRF_HEADER);
-  if (!cookieToken || !headerToken) return false;
-  if (!constantEqual(cookieToken, headerToken)) return false;
-  if (!isSignedCsrfToken(cookieToken, secret)) return false;
+  if (cookieTokens.length === 0 || !headerToken) return false;
+  if (!isSignedCsrfToken(headerToken, secret)) return false;
+  if (!cookieTokens.some((cookieToken) => constantEqual(cookieToken, headerToken))) return false;
   return allowedRequestHost(req);
 }
 

@@ -51,6 +51,21 @@ describe('CSRF hardening', () => {
     expect(verifyCsrfRequest(request, 'secret')).toBe(true);
   });
 
+  it('accepts a signed header token when a stale duplicate CSRF cookie is also present', () => {
+    const staleToken = createCsrfToken('old-secret');
+    const freshToken = createCsrfToken('secret');
+    const request = new Request('http://localhost/api/products', {
+      method: 'POST',
+      headers: {
+        cookie: `sugi_csrf=${staleToken}; sugi_csrf=${freshToken}`,
+        'x-csrf-token': freshToken,
+        origin: 'http://localhost',
+      },
+    });
+
+    expect(verifyCsrfRequest(request, 'secret')).toBe(true);
+  });
+
   it('rejects missing, mismatched, or cross-origin CSRF requests', () => {
     const token = createCsrfToken('secret');
     const missing = new Request('http://localhost/api/sales', { method: 'POST' });
