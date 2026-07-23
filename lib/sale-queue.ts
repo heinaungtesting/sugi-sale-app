@@ -511,8 +511,10 @@ export function initSaleQueue(): () => void {
   // Safari in particular drops the `online` event after a Wi-Fi flap, so the
   // queue can stay pending forever otherwise.
   staleDrainTimer = setInterval(() => {
-    if (online && entries.some((e) => e.status === 'pending') && !draining) {
-      scheduleDrain(0);
+    if (online && entries.some((e) => e.status === 'pending' || e.status === 'sending') && !draining) {
+      // iOS may delay/drop the Service Worker message after background replay.
+      // Re-read authoritative IndexedDB so accepted sales leave the syncing UI.
+      void hydratePersistedQueue();
     }
   }, STALE_DRAIN_INTERVAL_MS);
 

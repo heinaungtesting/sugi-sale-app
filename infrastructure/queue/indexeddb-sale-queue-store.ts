@@ -31,6 +31,23 @@ function isStoredQueueRecord(value: unknown): value is StoredQueueRecord {
     && typeof (value as { idempotencyKey?: unknown }).idempotencyKey === 'string';
 }
 
+export function shouldWriteQueueRecord(
+  current: StoredQueueRecord | undefined,
+  incoming: StoredQueueRecord,
+  now: number,
+): boolean {
+  if (!current) return true;
+  // `synced` is terminal. A delayed page persist must never regress the record
+  // after the Service Worker has already received the canonical server sale.
+  if (current.status === 'synced' && incoming.status !== 'synced') return false;
+  const foreignActiveLease = Boolean(
+    current.leaseOwner
+    && Number(current.leaseExpiresAt ?? 0) > now
+    && current.leaseOwner !== incoming.leaseOwner
+  );
+  return !foreignActiveLease;
+}
+
 export function loadLegacyQueueRecords(): StoredQueueRecord[] {
   try {
     if (typeof window === 'undefined') return [];
@@ -87,12 +104,7 @@ export async function saveQueueRecords(records: readonly unknown[]): Promise<'in
       if (!isStoredQueueRecord(record)) continue;
       incomingKeys.add(record.idempotencyKey);
       const current = existing.find((item) => item.idempotencyKey === record.idempotencyKey);
-      const foreignActiveLease = Boolean(
-        current?.leaseOwner
-        && Number(current.leaseExpiresAt ?? 0) > now
-        && current.leaseOwner !== record.leaseOwner
-      );
-      if (!foreignActiveLease) await tx.store.put(record);
+      if (shouldWriteQueueRecord(current, record, now)) await tx.store.put(record);
     }
     for (const current of existing) {
       const activelyLeased = current.leaseOwner && Number(current.leaseExpiresAt ?? 0) > now;

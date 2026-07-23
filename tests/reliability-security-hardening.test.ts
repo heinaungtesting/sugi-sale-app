@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createCsrfToken, verifyCsrfRequest } from '../lib/csrf';
+import { shouldWriteQueueRecord } from '../infrastructure/queue/indexeddb-sale-queue-store';
 
 const source = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 
@@ -41,6 +42,33 @@ describe('offline queue durability', () => {
     expect(queue).toContain("restored.status === 'sending' && leaseExpired");
     expect(worker).toContain('async function claimNextSaleQueueEntry');
     expect(worker).toContain('entry.leaseExpiresAt <= now');
+  });
+
+  it('never lets a stale page snapshot downgrade a Service Worker synced record', () => {
+    const now = Date.now();
+    expect(shouldWriteQueueRecord(
+      { idempotencyKey: 'sale-1', status: 'synced' },
+      { idempotencyKey: 'sale-1', status: 'sending', leaseOwner: 'page', leaseExpiresAt: now + 90_000 },
+      now,
+    )).toBe(false);
+    expect(shouldWriteQueueRecord(
+      { idempotencyKey: 'sale-1', status: 'synced' },
+      { idempotencyKey: 'sale-1', status: 'pending' },
+      now,
+    )).toBe(false);
+    expect(shouldWriteQueueRecord(
+      { idempotencyKey: 'sale-1', status: 'sending' },
+      { idempotencyKey: 'sale-1', status: 'synced' },
+      now,
+    )).toBe(true);
+  });
+
+  it('periodically reconciles active queue UI state from authoritative IndexedDB', () => {
+    const queue = source('lib/sale-queue.ts');
+    const timerStart = queue.indexOf('staleDrainTimer = setInterval');
+    const timerBody = queue.slice(timerStart, timerStart + 500);
+    expect(timerBody).toContain("entries.some((e) => e.status === 'pending' || e.status === 'sending')");
+    expect(timerBody).toContain('void hydratePersistedQueue()');
   });
 });
 

@@ -1,6 +1,6 @@
 {
   "name": "sugi-sale-app",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "private": true,
   "description": "Mobile-first multi-user Sugi sale logger",
   "scripts": {
