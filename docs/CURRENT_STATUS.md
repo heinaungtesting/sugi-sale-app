@@ -486,14 +486,10 @@ If IndexedDB is unavailable, the queue falls back to localStorage. Memory is use
 - Configurable Secure cookie behavior for HTTPS vs private HTTP deployment.
 - Database-backed session revocation.
 - Role-based admin authorization.
-- Signed double-submit CSRF protection:
-  - Random nonce
-  - HMAC signature
-  - CSRF cookie
-  - `X-CSRF-Token` header
+- Tokenless mutation-origin guard:
   - Same-origin Origin/Referer validation
-  - Proxy-aware host validation
-- CSRF checks on authenticated state-changing routes.
+  - Proxy-aware allowlisted host validation
+  - No CSRF cookie, HMAC token, custom CSRF header, refresh, or replay path
 - Sales and history ownership checks.
 - Positive point-value validation.
 - Quantity and request validation.

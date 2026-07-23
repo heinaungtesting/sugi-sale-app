@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createCsrfToken, verifyCsrfRequest } from '../lib/csrf';
+import { verifyCsrfRequest } from '../lib/csrf';
 import { shouldWriteQueueRecord } from '../infrastructure/queue/indexeddb-sale-queue-store';
 
 const source = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
@@ -94,9 +94,8 @@ describe('Postgres-backed throttling', () => {
   });
 });
 
-describe('mixed-origin CSRF host policy', () => {
+describe('mixed-origin mutation host policy', () => {
   it('accepts explicitly allowed MagicDNS and Tailscale-IP hosts', () => {
-    const token = createCsrfToken('secret');
     for (const [url, host, origin] of [
       ['http://100.111.161.73:8080/api/feedback', '100.111.161.73:8080', 'http://100.111.161.73:8080'],
       ['http://100.111.161.73:8080/api/feedback', 'herme-agents.tail71ac56.ts.net', 'https://herme-agents.tail71ac56.ts.net'],
@@ -104,34 +103,29 @@ describe('mixed-origin CSRF host policy', () => {
       const request = new Request(url, {
         method: 'POST',
         headers: {
-          cookie: `sugi_csrf=${token}`,
-          'x-csrf-token': token,
           host,
           origin,
         },
       });
-      expect(verifyCsrfRequest(request, 'secret')).toBe(true);
+      expect(verifyCsrfRequest(request)).toBe(true);
     }
   });
 
-  it('rejects an unlisted host even with a valid double-submit token', () => {
-    const token = createCsrfToken('secret');
+  it('rejects an unlisted host', () => {
     const request = new Request('https://evil.example/api/feedback', {
       method: 'POST',
       headers: {
-        cookie: `sugi_csrf=${token}`,
-        'x-csrf-token': token,
         host: 'evil.example',
         origin: 'https://evil.example',
       },
     });
-    expect(verifyCsrfRequest(request, 'secret')).toBe(false);
+    expect(verifyCsrfRequest(request)).toBe(false);
   });
 
-  it('checks the double-submit token before applying the secondary host policy', () => {
+  it('contains no double-submit cookie comparison', () => {
     const csrf = source('lib/csrf.ts');
-    const verifyStart = csrf.indexOf('export function verifyCsrfRequest');
-    const verifyBody = csrf.slice(verifyStart, verifyStart + 700);
-    expect(verifyBody.indexOf('constantEqual(cookieToken, headerToken)')).toBeLessThan(verifyBody.indexOf('allowedRequestHost'));
+    expect(csrf).not.toContain('constantEqual');
+    expect(csrf).not.toContain('cookieToken');
+    expect(csrf).toContain('allowedRequestHost(req)');
   });
 });

@@ -1,5 +1,4 @@
 import { loginUser, setSession } from '@/lib/auth';
-import { setCsrfCookie } from '@/lib/csrf';
 import { logEvent, requestId } from '@/infrastructure/logging/structured-logger';
 import { incrementMetric, observeMetric } from '@/infrastructure/observability/metrics';
 import {
@@ -45,7 +44,6 @@ export async function POST(req: Request) {
   }
   await clearFailedLogins(key);
   await setSession(user, req);
-  await setCsrfCookie();
   incrementMetric('login.success');
   observeMetric('login.duration_ms', performance.now() - started);
   logEvent('login_success', { requestId: reqId, userId: user.id, durationMs: Math.round(performance.now() - started) });

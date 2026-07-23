@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'sugi-pwa-v18';
+const CACHE_VERSION = 'sugi-pwa-v19';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const OFFLINE_URL = '/offline';
@@ -138,18 +138,6 @@ async function claimNextSaleQueueEntry(db) {
   return entry;
 }
 
-async function csrfToken() {
-  const response = await fetch('/api/auth/csrf', {
-    method: 'GET',
-    cache: 'no-store',
-    credentials: 'include',
-  });
-  if (!response.ok) throw new Error('csrf token unavailable');
-  const body = await response.json();
-  if (typeof body.token !== 'string') throw new Error('csrf token missing');
-  return body.token;
-}
-
 async function notifyQueueClients() {
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
   for (const client of windows) client.postMessage({ type: 'SALE_QUEUE_UPDATED' });
@@ -163,12 +151,10 @@ async function replaySaleQueue() {
     entry.attempts = Number(entry.attempts || 0) + 1;
     await writeSaleQueueEntry(db, entry);
     try {
-      const token = await csrfToken();
       const response = await fetch('/api/sales', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-CSRF-Token': token,
           'X-Queue-Attempt': String(entry.attempts),
         },
         body: JSON.stringify({
