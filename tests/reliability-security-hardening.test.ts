@@ -31,6 +31,15 @@ describe('offline queue durability', () => {
     expect(worker).toContain("fetch('/api/sales'");
   });
 
+  it('reconciles accepted receipts inside the Service Worker before replay', () => {
+    const worker = source('public/sw.js');
+    expect(worker).toContain('async function reconcileAcceptedQueue');
+    expect(worker).toContain("fetch('/api/sales/status'");
+    expect(worker).toContain('await reconcileAcceptedQueue(db)');
+    expect(worker).toContain("entry.status = 'synced'");
+    expect(worker).toContain('entry.sale = accepted.sale');
+  });
+
   it('atomically leases queue entries across the page and Service Worker', () => {
     const store = source('infrastructure/queue/indexeddb-sale-queue-store.ts');
     const queue = source('lib/sale-queue.ts');

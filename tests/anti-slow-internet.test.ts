@@ -47,6 +47,7 @@ describe('anti-slow-internet contract', () => {
       expect(repository).toContain('ANY($2::text[])');
       expect(queue).toContain("csrfFetch('/api/sales/status'");
       expect(queue).toContain('applyAcceptedSales(entries, body.accepted)');
+      expect(route).toContain("logEvent('sale_status_checked'");
     });
 
     it('does not consume the rate-limit budget for idempotent replays', () => {

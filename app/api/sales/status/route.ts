@@ -2,6 +2,7 @@ import { currentUser, requireUserResponse } from '@/lib/auth';
 import { requireCsrf } from '@/lib/csrf';
 import { isValidIdempotencyKey } from '@/lib/sugi-db';
 import { saleRepository } from '@/repositories/sale-repository';
+import { logEvent } from '@/infrastructure/logging/structured-logger';
 
 const MAX_STATUS_KEYS = 100;
 
@@ -21,5 +22,6 @@ export async function POST(req: Request) {
   }
 
   const accepted = await saleRepository.findAcceptedByIdempotencyKeys(user.id, keys);
+  logEvent('sale_status_checked', { userId: user.id, requested: keys.length, accepted: accepted.length });
   return Response.json({ accepted });
 }

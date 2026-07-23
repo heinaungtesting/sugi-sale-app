@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'sugi-pwa-v19';
+const CACHE_VERSION = 'sugi-pwa-v20';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const OFFLINE_URL = '/offline';
@@ -34,6 +34,13 @@ self.addEventListener('activate', (event) => {
         .map((key) => caches.delete(key)),
     );
     await self.clients.claim();
+    try {
+      const db = await openSaleQueueDb();
+      await reconcileAcceptedQueue(db);
+      await notifyQueueClients();
+    } catch {
+      // The page queue remains the fallback when activation reconciliation fails.
+    }
     setTimeout(() => {
       void self.clients.matchAll({ type: 'window' }).then((windows) =>
         Promise.all(windows.map((client) => client.navigate(client.url))),
@@ -138,6 +145,42 @@ async function claimNextSaleQueueEntry(db) {
   return entry;
 }
 
+async function reconcileAcceptedQueue(db) {
+  const records = await readSaleQueue(db);
+  const active = records
+    .filter((entry) => entry.status !== 'synced' && typeof entry.idempotencyKey === 'string')
+    .slice(0, 100);
+  if (active.length === 0) return 0;
+
+  const response = await fetch('/api/sales/status', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idempotency_keys: active.map((entry) => entry.idempotencyKey) }),
+    credentials: 'include',
+    cache: 'no-store',
+  });
+  if (!response.ok) return 0;
+  const body = await response.json();
+  const acceptedByKey = new Map(
+    Array.isArray(body.accepted)
+      ? body.accepted.map((accepted) => [accepted.idempotency_key, accepted])
+      : [],
+  );
+  let changed = 0;
+  for (const entry of active) {
+    const accepted = acceptedByKey.get(entry.idempotencyKey);
+    if (!accepted?.sale) continue;
+    entry.status = 'synced';
+    entry.sale = accepted.sale;
+    delete entry.lastError;
+    delete entry.leaseOwner;
+    delete entry.leaseExpiresAt;
+    await writeSaleQueueEntry(db, entry);
+    changed += 1;
+  }
+  return changed;
+}
+
 async function notifyQueueClients() {
   const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
   for (const client of windows) client.postMessage({ type: 'SALE_QUEUE_UPDATED' });
@@ -145,6 +188,7 @@ async function notifyQueueClients() {
 
 async function replaySaleQueue() {
   const db = await openSaleQueueDb();
+  await reconcileAcceptedQueue(db);
   while (true) {
     const entry = await claimNextSaleQueueEntry(db);
     if (!entry) break;
