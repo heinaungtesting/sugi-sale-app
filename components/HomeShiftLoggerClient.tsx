@@ -100,14 +100,14 @@ export function HomeShiftLoggerClient({ user, products, todayDate, today, showFe
   const seenQueueKeys = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    const dispose = initSaleQueue();
+    const dispose = initSaleQueue(user.id);
     const unsub = subscribe((next) => setQueueSnapshot(next));
     setQueueSnapshot(getSnapshot());
     return () => {
       unsub();
       dispose();
     };
-  }, []);
+  }, [user.id]);
 
   useEffect(() => {
     const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY);
@@ -306,7 +306,7 @@ export function HomeShiftLoggerClient({ user, products, todayDate, today, showFe
         onLanguageChange={changeLanguage}
         activePage="home"
       />
-      <SearchProductLogger products={products} language={language} setTodaySummary={setTodaySummary} onQuickAddCreated={onQuickAddCreated} />
+      <SearchProductLogger userId={user.id} products={products} language={language} setTodaySummary={setTodaySummary} onQuickAddCreated={onQuickAddCreated} />
       <PageCard
         title={t.recentTitle}
         description={t.recentDescription}

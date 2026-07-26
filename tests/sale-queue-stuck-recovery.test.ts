@@ -92,11 +92,12 @@ describe('sale queue stuck-pending recovery', () => {
     });
 
     const queue = await import('../lib/sale-queue');
-    queue.initSaleQueue();
+    queue.initSaleQueue(1);
     await vi.runOnlyPendingTimersAsync();
     salefetchAttempts = 0;
 
     queue.enqueueSale({
+      ownerUserId: 1,
       productId: 1,
       productName: 'stuck-item',
       pointValue: 5,
@@ -141,10 +142,10 @@ describe('sale queue stuck-pending recovery', () => {
     });
 
     const queue = await import('../lib/sale-queue');
-    queue.initSaleQueue();
+    queue.initSaleQueue(1);
     await vi.runOnlyPendingTimersAsync();
 
-    queue.enqueueSale({ productId: 1, productName: 'csrffail', pointValue: 5, quantity: 1 });
+    queue.enqueueSale({ ownerUserId: 1, productId: 1, productName: 'csrffail', pointValue: 5, quantity: 1 });
     await vi.runOnlyPendingTimersAsync();
     const snap = queue.getSnapshot();
     expect(snap.failedCount, 'transient CSRF failures must not mark the entry failed').toBe(0);
@@ -178,7 +179,7 @@ describe('sale queue stuck-pending recovery', () => {
     });
 
     const queue = await import('../lib/sale-queue');
-    queue.initSaleQueue();
+    queue.initSaleQueue(1);
     await vi.runOnlyPendingTimersAsync();
     expect(queue.getSnapshot().pendingCount).toBe(0);
 

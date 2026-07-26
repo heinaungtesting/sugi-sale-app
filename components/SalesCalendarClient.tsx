@@ -14,6 +14,7 @@ type SaleLog = { id: number; product_name: string; quantity: number; total_point
 
 
 type Props = {
+  userId: number;
   products: SearchableProduct[];
   initialMonth: string;
   initialDate: string;
@@ -46,7 +47,7 @@ function variantDisplayLabel(variant: ProductVariant, family: ProductFamily) {
   return variant.label;
 }
 
-export function SalesCalendarClient({ products, initialMonth, initialDate, monthTotals, day }: Props) {
+export function SalesCalendarClient({ userId, products, initialMonth, initialDate, monthTotals, day }: Props) {
   const router = useRouter();
   const [month, setMonth] = useState(initialMonth);
   const [selectedDate, setSelectedDate] = useState(initialDate);
@@ -69,14 +70,14 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
   const hiddenFamilyCount = Math.max(0, allAddFamilies.length - addFamilies.length);
 
   useEffect(() => {
-    const dispose = initSaleQueue();
+    const dispose = initSaleQueue(userId);
     const unsub = subscribe((next) => setQueueSnapshot(next));
     setQueueSnapshot(getSnapshot());
     return () => {
       unsub();
       dispose();
     };
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
     // Once the server has the canonical record, drop the queue entry from the
@@ -152,6 +153,7 @@ export function SalesCalendarClient({ products, initialMonth, initialDate, month
       setRecentlyTapped((current) => (current === busyKey ? null : current));
     }, TAP_DEBOUNCE_MS);
     enqueueSale({
+      ownerUserId: userId,
       productId: variant.productId,
       variantId: variant.variantId ?? null,
       productName: variant.productName,

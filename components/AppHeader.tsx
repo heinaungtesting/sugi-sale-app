@@ -11,7 +11,7 @@ type Language = 'en' | 'ja';
 type ActivePage = 'home' | 'sales' | 'logs' | 'feedback' | 'sessions' | 'admin';
 
 type Props = {
-  user: { displayName: string; role?: string };
+  user: { id: number; displayName: string; role?: string };
   totalPoints: number;
   totalItems: number;
   backHref?: string;
@@ -93,7 +93,7 @@ export function AppHeader({ user, totalPoints, totalItems, backHref, language, o
             )}
           </div>
           <div className="header-actions">
-            <ConnectivityIndicator language={activeLanguage} />
+            <ConnectivityIndicator userId={user.id} language={activeLanguage} />
             <div className="language-toggle" aria-label="Language">
               <button className={activeLanguage === 'en' ? 'active' : ''} onClick={() => switchLanguage('en')} type="button">English</button>
               <button className={activeLanguage === 'ja' ? 'active' : ''} onClick={() => switchLanguage('ja')} type="button">日本語</button>

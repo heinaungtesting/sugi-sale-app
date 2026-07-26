@@ -20,7 +20,7 @@ export default async function SalesPage() {
   return (
     <AppShell>
       <AppHeader user={user} totalPoints={day.total_points} totalItems={day.total_items} activePage="sales" showMetrics={false} />
-      <SalesCalendarClient products={products} initialMonth={month} initialDate={todayDate} monthTotals={monthTotals} day={day} />
+      <SalesCalendarClient userId={user.id} products={products} initialMonth={month} initialDate={todayDate} monthTotals={monthTotals} day={day} />
     </AppShell>
   );
 }

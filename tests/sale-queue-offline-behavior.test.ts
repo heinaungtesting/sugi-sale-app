@@ -46,7 +46,7 @@ describe('sale queue real offline behavior', () => {
 
   it('does not POST queued sales while the browser is offline after an offline event', async () => {
     const queue = await import('../lib/sale-queue');
-    queue.initSaleQueue();
+    queue.initSaleQueue(1);
 
     // Initial health probe may call fetch. The regression is about sale POSTs after
     // the browser fires `offline`, so clear the probe call evidence first.
@@ -62,6 +62,7 @@ describe('sale queue real offline behavior', () => {
     for (const cb of listeners.offline ?? []) cb();
 
     queue.enqueueSale({
+      ownerUserId: 1,
       productId: 50,
       productName: 'brain',
       pointValue: 120,

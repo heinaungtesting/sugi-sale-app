@@ -7,7 +7,7 @@ type Product = { id: number; product_name: string; point_value: number; category
 
 const TAP_DEBOUNCE_MS = 250;
 
-export function ProductTapList({ products }: { products: Product[] }) {
+export function ProductTapList({ userId, products }: { userId: number; products: Product[] }) {
   const [recentlyTapped, setRecentlyTapped] = useState<number | null>(null);
 
   function log(product: Product) {
@@ -17,6 +17,7 @@ export function ProductTapList({ products }: { products: Product[] }) {
       setRecentlyTapped((current) => (current === product.id ? null : current));
     }, TAP_DEBOUNCE_MS);
     enqueueSale({
+      ownerUserId: userId,
       productId: product.id,
       variantId: null,
       productName: product.product_name,

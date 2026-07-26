@@ -13,6 +13,12 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => ({})) as Record<string, unknown>;
   const validation = validateCreateSale(body);
   if (!validation.ok) return Response.json({ error: validation.error }, { status: 400 });
+  if (validation.command.idempotencyKey) {
+    const queuedOwnerUserId = Number(body.owner_user_id);
+    if (!Number.isInteger(queuedOwnerUserId) || queuedOwnerUserId !== user.id) {
+      return Response.json({ error: 'queued sale owner mismatch' }, { status: 409 });
+    }
+  }
 
   const result = await createSale(user.id, validation.command, {
     requestId: requestId(req),

@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'sugi-pwa-v20';
+const CACHE_VERSION = 'sugi-pwa-v21';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const OFFLINE_URL = '/offline';
@@ -202,6 +202,7 @@ async function replaySaleQueue() {
           'X-Queue-Attempt': String(entry.attempts),
         },
         body: JSON.stringify({
+          owner_user_id: entry.ownerUserId,
           product_id: entry.productId,
           variant_id: entry.variantId ?? undefined,
           quantity: entry.quantity,
@@ -226,7 +227,7 @@ async function replaySaleQueue() {
       try { body = await response.json(); } catch { /* non-JSON error */ }
       entry.lastError = body?.error || `http_${response.status}`;
       const transient = response.status === 408 || response.status === 429 || response.status >= 500;
-      entry.status = transient || response.status === 401 || response.status === 403 ? 'pending' : 'failed';
+      entry.status = response.status === 409 ? 'failed' : transient || response.status === 401 || response.status === 403 ? 'pending' : 'failed';
       delete entry.leaseOwner;
       delete entry.leaseExpiresAt;
       await writeSaleQueueEntry(db, entry);

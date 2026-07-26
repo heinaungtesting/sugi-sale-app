@@ -8,6 +8,7 @@ import { csrfFetch } from '@/lib/csrf-client';
 type Language = 'en' | 'ja';
 
 type Props = {
+  userId: number;
   products: SearchableProduct[];
   language: Language;
   setTodaySummary: (sale: LoggedSaleResponse, queueKey: string) => void;
@@ -114,7 +115,7 @@ function quickAddEnqueue(entry: QueueEntry, language: Language): { sale: LoggedS
   };
 }
 
-export function SearchProductLogger({ products, language, setTodaySummary, onQuickAddCreated }: Props) {
+export function SearchProductLogger({ userId, products, language, setTodaySummary, onQuickAddCreated }: Props) {
   const [query, setQuery] = useState('');
   const [searchProducts, setSearchProducts] = useState<SearchableProduct[]>(products);
   const [isSearching, setIsSearching] = useState(false);
@@ -266,6 +267,7 @@ export function SearchProductLogger({ products, language, setTodaySummary, onQui
       setRecentlyTapped((current) => (current === busyKey ? null : current));
     }, TAP_DEBOUNCE_MS);
     const entry = enqueueSale({
+      ownerUserId: userId,
       productId: variant.productId,
       variantId: variant.variantId ?? null,
       productName: variant.productName,

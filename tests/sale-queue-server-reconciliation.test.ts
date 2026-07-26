@@ -6,6 +6,7 @@ describe('sale queue server receipt reconciliation', () => {
     const entries: QueueEntry[] = [
       {
         idempotencyKey: 'accepted-key-12345678',
+        ownerUserId: 1,
         productId: 1,
         productName: 'accepted',
         pointValue: 100,
@@ -22,6 +23,7 @@ describe('sale queue server receipt reconciliation', () => {
       },
       {
         idempotencyKey: 'unknown-key-12345678',
+        ownerUserId: 1,
         productId: 2,
         productName: 'unknown',
         pointValue: 50,

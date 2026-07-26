@@ -17,7 +17,7 @@ export default async function CategoryPage({ params }: { params: Promise<{ name:
     <main className="shell">
       <AppHeader user={user} totalPoints={today.total_points} totalItems={today.total_items} backHref="/" />
       <h2 className="section-title">{category}</h2>
-      {products.length === 0 ? <p className="muted">No products in this category.</p> : <ProductTapList products={products} />}
+      {products.length === 0 ? <p className="muted">No products in this category.</p> : <ProductTapList userId={user.id} products={products} />}
     </main>
   );
 }

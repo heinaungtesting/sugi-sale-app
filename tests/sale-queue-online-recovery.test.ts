@@ -49,7 +49,7 @@ describe('sale queue online recovery via health probe', () => {
 
   it('recovers from a stuck-offline state when the health probe sees the server', async () => {
     const queue = await import('../lib/sale-queue');
-    queue.initSaleQueue();
+    queue.initSaleQueue(1);
     await vi.runOnlyPendingTimersAsync();
 
     // Simulate iPhone Safari flap: navigator.onLine flips to false and the
@@ -64,6 +64,7 @@ describe('sale queue online recovery via health probe', () => {
 
     // User taps a product while the browser still says it is offline.
     queue.enqueueSale({
+      ownerUserId: 1,
       productId: 1,
       productName: 'recovery-item',
       pointValue: 1,

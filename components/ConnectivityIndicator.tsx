@@ -6,6 +6,7 @@ import { getSnapshot, initSaleQueue, subscribe, type QueueSnapshot } from '@/lib
 type Language = 'en' | 'ja';
 
 type Props = {
+  userId: number;
   language?: Language;
 };
 
@@ -40,12 +41,12 @@ function labelFor(state: 'online' | 'offline' | 'syncing', snap: QueueSnapshot, 
   return t.online;
 }
 
-export function ConnectivityIndicator({ language = 'ja' }: Props) {
+export function ConnectivityIndicator({ userId, language = 'ja' }: Props) {
   const [snap, setSnap] = useState<QueueSnapshot | null>(null);
   const t = copy[language];
 
   useEffect(() => {
-    const dispose = initSaleQueue();
+    const dispose = initSaleQueue(userId);
     const unsub = subscribe((next) => setSnap(next));
     // If the queue has not been initialised yet (SSR/early paint), getSnapshot still
     // returns a valid empty snapshot so the pill can render.
@@ -54,7 +55,7 @@ export function ConnectivityIndicator({ language = 'ja' }: Props) {
       unsub();
       dispose();
     };
-  }, []);
+  }, [userId]);
 
   const state: 'online' | 'offline' | 'syncing' = snap ? classify(snap) : 'online';
   const label = snap ? labelFor(state, snap, t) : t.online;

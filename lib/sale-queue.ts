@@ -44,6 +44,8 @@ export type QueueStatus = 'pending' | 'sending' | 'synced' | 'failed';
 export type QueueEntry = {
   /** Stable UUID for the queued tap. Server uses (user_id, idempotency_key) to dedupe. */
   idempotencyKey: string;
+  /** User authenticated when the tap occurred. Never replay under another account. */
+  ownerUserId: number;
   productId: number;
   variantId?: number | null;
   /** Cached product metadata for optimistic UI; the server returns the canonical name. */
@@ -77,6 +79,7 @@ export type QueueSnapshot = {
 type Subscriber = (snapshot: QueueSnapshot) => void;
 
 type QueueInput = {
+  ownerUserId: number;
   productId: number;
   variantId?: number | null;
   productName: string;
@@ -125,6 +128,7 @@ let storageBackend: QueueSnapshot['storageBackend'] = 'loading';
 let telemetryTimer: ReturnType<typeof setTimeout> | null = null;
 let lastTelemetryKey = '';
 let reconcilingServerReceipts = false;
+let activeUserId: number | null = null;
 
 function hasBrowser(): boolean {
   return typeof window !== 'undefined';
@@ -146,6 +150,8 @@ function normalizeRecords(parsed: unknown): QueueEntry[] {
       const e = raw as Partial<QueueEntry>;
       return !!e
         && typeof e.idempotencyKey === 'string'
+        && Number.isInteger(e.ownerUserId)
+        && Number(e.ownerUserId) > 0
         && typeof e.productId === 'number'
         && typeof e.productName === 'string'
         && (e.status === 'pending' || e.status === 'sending' || e.status === 'synced' || e.status === 'failed');
@@ -155,6 +161,7 @@ function normalizeRecords(parsed: unknown): QueueEntry[] {
       const restored: QueueEntry = {
         ...e,
         idempotencyKey: e.idempotencyKey,
+        ownerUserId: Number(e.ownerUserId),
         productId: e.productId,
         variantId: e.variantId ?? null,
         productName: e.productName,
@@ -196,7 +203,7 @@ async function registerBackgroundSync(): Promise<void> {
 
 function persist(): void {
   if (typeof window === 'undefined') return;
-  void saveQueueRecords(entries).then(async (backend) => {
+  void saveQueueRecords(entries, activeUserId).then(async (backend) => {
     if (storageBackend !== backend) {
       storageBackend = backend;
       emit();
@@ -256,7 +263,8 @@ function emit(): void {
 
 async function hydratePersistedQueue(): Promise<void> {
   storageBackend = await queueStorageBackend();
-  const persisted = normalizeRecords(await loadQueueRecords());
+  const persisted = normalizeRecords(await loadQueueRecords())
+    .filter((entry) => entry.ownerUserId === activeUserId);
   // IndexedDB is authoritative for matching keys because the Service Worker may
   // have advanced an entry to `synced` while the page was suspended.
   const persistedKeys = new Set(persisted.map((entry) => entry.idempotencyKey));
@@ -273,7 +281,9 @@ async function hydratePersistedQueue(): Promise<void> {
 
 async function reconcileAcceptedEntries(): Promise<void> {
   if (reconcilingServerReceipts) return;
-  const active = entries.filter((entry) => entry.status !== 'synced').slice(0, 100);
+  const active = entries
+    .filter((entry) => entry.ownerUserId === activeUserId && entry.status !== 'synced')
+    .slice(0, 100);
   if (active.length === 0) return;
   reconcilingServerReceipts = true;
   try {
@@ -287,7 +297,7 @@ async function reconcileAcceptedEntries(): Promise<void> {
     if (!response.ok) return;
     const body = await response.json() as { accepted?: AcceptedSaleReceipt[] };
     if (!Array.isArray(body.accepted) || applyAcceptedSales(entries, body.accepted) === 0) return;
-    storageBackend = await saveQueueRecords(entries);
+    storageBackend = await saveQueueRecords(entries, activeUserId);
     emit();
   } catch {
     // Normal queue retries remain the fallback when receipt reconciliation fails.
@@ -331,6 +341,7 @@ async function postOnce(entry: QueueEntry): Promise<PostResult> {
         'X-Queue-Attempt': String(Math.max(1, entry.attempts)),
       },
       body: JSON.stringify({
+        owner_user_id: entry.ownerUserId,
         product_id: entry.productId,
         variant_id: entry.variantId ?? undefined,
         quantity: entry.quantity,
@@ -365,8 +376,10 @@ async function postOnce(entry: QueueEntry): Promise<PostResult> {
 
 async function sendEntry(entry: QueueEntry): Promise<void> {
   if (entry.status === 'synced') return;
+  if (entry.ownerUserId !== activeUserId) return;
   const claimed = await claimQueueRecord(
     entry.idempotencyKey,
+    entry.ownerUserId,
     PAGE_QUEUE_OWNER,
     Date.now(),
     QUEUE_LEASE_MS,
@@ -428,7 +441,7 @@ async function drain(): Promise<void> {
     return;
   }
   const work = entries
-    .filter((e) => e.status === 'pending')
+    .filter((entry) => entry.ownerUserId === activeUserId && entry.status === 'pending')
     .sort((a, b) => a.enqueuedAt - b.enqueuedAt);
   if (work.length === 0) {
     return;
@@ -501,14 +514,21 @@ function setOnline(next: boolean): void {
 }
 
 /** Initialise event listeners, load the persisted queue, and kick off the first drain. */
-export function initSaleQueue(): () => void {
+export function initSaleQueue(userId: number): () => void {
   if (typeof window === 'undefined') return () => undefined;
+  if (!Number.isInteger(userId) || userId <= 0) return () => undefined;
+  if (initialized && activeUserId !== userId) {
+    cleanup?.();
+    entries = [];
+  }
   if (initialized) return cleanup ?? (() => undefined);
+  activeUserId = userId;
   initialized = true;
 
   // One-time synchronous compatibility read for queues created before v1.4. Every
   // ongoing write uses IndexedDB; hydration removes the legacy key after migration.
-  entries = normalizeRecords(loadLegacyQueueRecords());
+  entries = normalizeRecords(loadLegacyQueueRecords())
+    .filter((entry) => entry.ownerUserId === activeUserId);
   void hydratePersistedQueue().then(() => reconcileAcceptedEntries());
   online = typeof navigator === 'undefined' ? true : navigator.onLine;
   healthy = online;
@@ -519,9 +539,16 @@ export function initSaleQueue(): () => void {
       bc.onmessage = (event: MessageEvent) => {
         const data = event.data as { type?: string; snapshot?: QueueSnapshot } | null;
         if (data?.type === 'snapshot' && data.snapshot) {
+          const scopedEntries = data.snapshot.entries.filter((entry) => entry.ownerUserId === activeUserId);
+          const scopedSnapshot = {
+            ...data.snapshot,
+            entries: scopedEntries,
+            pendingCount: scopedEntries.filter((entry) => entry.status === 'pending' || entry.status === 'sending').length,
+            failedCount: scopedEntries.filter((entry) => entry.status === 'failed').length,
+          };
           for (const sub of subscribers) {
             try {
-              sub(data.snapshot);
+              sub(scopedSnapshot);
             } catch {
               // ignore
             }
@@ -634,6 +661,7 @@ export function enqueueSale(input: QueueInput): QueueEntry {
   const enqueuedAt = Date.now();
   const entry: QueueEntry = {
     idempotencyKey: newIdempotencyKey(),
+    ownerUserId: input.ownerUserId,
     productId: input.productId,
     variantId: input.variantId ?? null,
     productName: input.productName,
@@ -739,4 +767,5 @@ export function __resetForTests(): void {
   cleanup = null;
   storageBackend = 'loading';
   lastTelemetryKey = '';
+  activeUserId = null;
 }

@@ -44,6 +44,7 @@ describe('sale queue preserves the Tokyo date of the original tap', () => {
     const queue = await import('../lib/sale-queue');
 
     const entry = queue.enqueueSale({
+      ownerUserId: 1,
       productId: 1,
       productName: 'queued-before-sync',
       pointValue: 100,
@@ -58,6 +59,7 @@ describe('sale queue preserves the Tokyo date of the original tap', () => {
     vi.setSystemTime(new Date('2026-07-13T23:30:00.000Z')); // 2026-07-14 08:30 JST
     stubBrowser(makeStorage([{
       idempotencyKey: 'legacy-tap-date-key-12345678',
+      ownerUserId: 1,
       productId: 1,
       variantId: null,
       productName: 'legacy-offline-tap',
@@ -70,7 +72,7 @@ describe('sale queue preserves the Tokyo date of the original tap', () => {
     }]));
     const queue = await import('../lib/sale-queue');
 
-    queue.initSaleQueue();
+    queue.initSaleQueue(1);
 
     expect(queue.getSnapshot().entries[0]?.soldDate).toBe('2026-07-13');
   });
@@ -80,9 +82,9 @@ describe('sale queue preserves the Tokyo date of the original tap', () => {
     const queue = await import('../lib/sale-queue');
 
     vi.setSystemTime(new Date('2026-07-13T14:55:00.000Z')); // 2026-07-13 23:55 JST
-    queue.enqueueSale({ productId: 1, productName: 'yesterday', pointValue: 100, quantity: 1 });
+    queue.enqueueSale({ ownerUserId: 1, productId: 1, productName: 'yesterday', pointValue: 100, quantity: 1 });
     vi.setSystemTime(new Date('2026-07-13T15:05:00.000Z')); // 2026-07-14 00:05 JST
-    queue.enqueueSale({ productId: 2, productName: 'today', pointValue: 200, quantity: 1 });
+    queue.enqueueSale({ ownerUserId: 1, productId: 2, productName: 'today', pointValue: 200, quantity: 1 });
 
     expect(queue.entriesForSaleDate(queue.getSnapshot().entries, '2026-07-14').map((entry) => entry.productName)).toEqual(['today']);
   });

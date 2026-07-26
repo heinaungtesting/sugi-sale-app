@@ -9,6 +9,7 @@ const LEGACY_KEY = 'sugi-sale-queue-v1';
 
 type StoredQueueRecord = Record<string, unknown> & {
   idempotencyKey: string;
+  ownerUserId?: number;
   status?: string;
   createdAt?: string;
   leaseOwner?: string;
@@ -93,7 +94,7 @@ export async function loadQueueRecords(): Promise<unknown[]> {
   }
 }
 
-export async function saveQueueRecords(records: readonly unknown[]): Promise<'indexeddb' | 'memory'> {
+export async function saveQueueRecords(records: readonly unknown[], ownerUserId?: number | null): Promise<'indexeddb' | 'memory'> {
   try {
     const db = await openQueueDb();
     const tx = db.transaction(STORE_NAME, 'readwrite');
@@ -108,7 +109,8 @@ export async function saveQueueRecords(records: readonly unknown[]): Promise<'in
     }
     for (const current of existing) {
       const activelyLeased = current.leaseOwner && Number(current.leaseExpiresAt ?? 0) > now;
-      if (!incomingKeys.has(current.idempotencyKey) && !activelyLeased) {
+      const belongsToActiveUser = ownerUserId == null || Number(current.ownerUserId) === ownerUserId;
+      if (belongsToActiveUser && !incomingKeys.has(current.idempotencyKey) && !activelyLeased) {
         await tx.store.delete(current.idempotencyKey);
       }
     }
@@ -122,6 +124,7 @@ export async function saveQueueRecords(records: readonly unknown[]): Promise<'in
 
 export async function claimQueueRecord(
   idempotencyKey: string,
+  ownerUserId: number,
   owner: string,
   now: number,
   leaseMs: number,
@@ -130,6 +133,10 @@ export async function claimQueueRecord(
     const db = await openQueueDb();
     const tx = db.transaction(STORE_NAME, 'readwrite');
     const current = await tx.store.get(idempotencyKey);
+    if (Number(current?.ownerUserId) !== ownerUserId) {
+      await tx.done;
+      return null;
+    }
     const leaseExpired = Number(current?.leaseExpiresAt ?? 0) <= now;
     const claimable = current?.status === 'pending'
       || (current?.status === 'sending' && leaseExpired);
