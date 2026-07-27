@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/domain/products/search-ranking';
 import { enqueueSale, type QueueEntry } from '@/lib/sale-queue';
 import { csrfFetch } from '@/lib/csrf-client';
+import { triggerTapHaptic } from '@/lib/haptics';
 
 type Language = 'en' | 'ja';
 
@@ -262,6 +263,7 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
   function log(variant: ProductVariant, assignedPoints?: number) {
     const busyKey = busyKeyFor(variant);
     if (recentlyTapped === busyKey) return;
+    triggerTapHaptic();
     setRecentlyTapped(busyKey);
     setTimeout(() => {
       setRecentlyTapped((current) => (current === busyKey ? null : current));
@@ -382,7 +384,7 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
                     return (
                       <button
                         key={busyKey}
-                        className="variant-button"
+                        className="variant-button sale-tap-button"
                         onPointerDown={() => startLongPress(variant)}
                         onPointerUp={cancelLongPress}
                         onPointerLeave={cancelLongPress}
@@ -449,7 +451,7 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
                     return (
                       <button
                         key={busyKey}
-                        className="variant-button"
+                        className="variant-button sale-tap-button"
                         onPointerDown={() => startLongPress(variant)}
                         onPointerUp={cancelLongPress}
                         onPointerLeave={cancelLongPress}

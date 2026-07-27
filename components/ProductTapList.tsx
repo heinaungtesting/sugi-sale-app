@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { enqueueSale } from '@/lib/sale-queue';
+import { triggerTapHaptic } from '@/lib/haptics';
 
 type Product = { id: number; product_name: string; point_value: number; category: string; scope: string };
 
@@ -12,6 +13,7 @@ export function ProductTapList({ userId, products }: { userId: number; products:
 
   function log(product: Product) {
     if (recentlyTapped === product.id) return;
+    triggerTapHaptic();
     setRecentlyTapped(product.id);
     setTimeout(() => {
       setRecentlyTapped((current) => (current === product.id ? null : current));
@@ -33,7 +35,7 @@ export function ProductTapList({ userId, products }: { userId: number; products:
         return (
           <button
             key={product.id}
-            className="product-row"
+            className="product-row sale-tap-button"
             onClick={() => log(product)}
             disabled={isDebouncing}
             aria-busy={isDebouncing}

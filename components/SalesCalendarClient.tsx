@@ -8,6 +8,7 @@ import { enqueueSale, getSnapshot, initSaleQueue, pruneSyncedToServerIds, subscr
 import { buildCalendarCells, monthAnchorDate } from '@/lib/sales-calendar';
 import { mergeDisplayedSales } from '@/lib/sale-display';
 import { csrfFetch } from '@/lib/csrf-client';
+import { triggerTapHaptic } from '@/lib/haptics';
 
 type MonthTotal = { sold_date: string; total_points: number; total_items: number };
 type SaleLog = { id: number; product_name: string; quantity: number; total_points: number; points_per_item: number; _queueKey?: string };
@@ -148,6 +149,7 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
   async function addProductToSelectedDate(variant: ProductVariant) {
     const busyKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
     if (recentlyTapped === busyKey) return;
+    triggerTapHaptic();
     setRecentlyTapped(busyKey);
     setTimeout(() => {
       setRecentlyTapped((current) => (current === busyKey ? null : current));
@@ -251,7 +253,7 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
                           const busyKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
                           const isDebouncing = recentlyTapped === busyKey;
                           return (
-                            <button key={busyKey} onClick={() => addProductToSelectedDate(variant)} disabled={isDebouncing} title={variant.productName} aria-busy={isDebouncing}>
+                            <button key={busyKey} className="sale-tap-button" onClick={() => addProductToSelectedDate(variant)} disabled={isDebouncing} title={variant.productName} aria-busy={isDebouncing}>
                               {variantDisplayLabel(variant, family)}
                             </button>
                           );

@@ -31,6 +31,7 @@ import {
   type ProductVariant,
   type SearchableProduct,
 } from '@/domain/products/search-ranking';
+import { triggerTapHaptic } from '@/lib/haptics';
 
 type View = 'home' | 'history' | 'settings';
 const staticCatalog = productCatalog as SearchableProduct[];
@@ -128,6 +129,7 @@ export function LocalOnlyApp() {
   async function logVariant(variant: ProductVariant) {
     const tapKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
     if (recentlyTapped === tapKey) return;
+    triggerTapHaptic();
     setRecentlyTapped(tapKey);
     window.setTimeout(() => setRecentlyTapped((current) => current === tapKey ? null : current), TAP_DEBOUNCE_MS);
     const now = new Date();
@@ -330,8 +332,9 @@ export function LocalOnlyApp() {
                     {family.variants.map((variant) => {
                       const key = `${variant.productId}:${variant.variantId ?? 'base'}`;
                       const label = family.variants.length === 1 && variant.label === '標準' ? '記録' : variant.label;
+                      const isDebouncing = recentlyTapped === key;
                       return (
-                        <button key={key} className="variant-button" disabled={recentlyTapped === key} onClick={() => void logVariant(variant)}>
+                        <button key={key} className="variant-button sale-tap-button" disabled={isDebouncing} aria-busy={isDebouncing} onClick={() => void logVariant(variant)}>
                           <span>{label}</span>
                           <small>{variant.pointValue.toLocaleString()}pt</small>
                         </button>

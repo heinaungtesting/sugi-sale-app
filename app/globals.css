@@ -3035,6 +3035,15 @@ button:disabled { cursor: not-allowed; }
 .variant-button:focus-visible, .calendar-add-variants button:focus-visible { outline: none; box-shadow: var(--focus-ring), 0 3px 8px rgba(101,70,47,.06); }
 .variant-button:active, .calendar-add-variants button:active { transform: scale(.96) !important; }
 .variant-button[aria-busy="true"] { background: var(--mint-soft) !important; border-color: var(--mint-border); }
+.sale-tap-button[aria-busy="true"] {
+  transform: scale(.94) !important;
+  background: #f0b85a !important;
+  border-color: #d59632 !important;
+  color: #4f321f !important;
+  box-shadow: inset 0 3px 7px rgba(79,50,31,.22) !important;
+  opacity: 1 !important;
+  transition-duration: 60ms !important;
+}
 .recent-row, .sales-log-card, .full-log-row, .category-total-panel, .calendar-add-inline, .admin-product-list button, .admin-variant-row, .admin-result-box { border: 1px solid var(--border-soft) !important; border-radius: 17px !important; background: var(--cream-surface) !important; box-shadow: 0 5px 12px rgba(101,70,47,.055); }
 .recent-row strong, .sales-log-card strong, .full-log-row strong, .admin-product-list strong { color: var(--text-choco); font-weight: 800; line-height: 1.35; text-wrap: pretty; }
 .points, .full-log-row > span, .category-total-chip span, .sales-log-card span { color: var(--text-choco) !important; font-variant-numeric: tabular-nums; }
