@@ -571,6 +571,35 @@ button, input {
   font-variant-numeric: tabular-nums;
 }
 
+.shift-log-panel .variant-previous-points {
+  color: #8a6a4b;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.previous-points-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 8px 11px;
+  border: 1px solid var(--sales-line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--sales-accent);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.previous-points-toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--sales-accent);
+}
+
 .variant-button:active {
   transform: scale(0.98);
 }

@@ -31,6 +31,7 @@ export type SearchableProduct = Product & {
   variant_display_shortcut?: string | null;
   variant_point_value?: number | null;
   variant_aliases?: string[];
+  previous_point_value?: number | null;
 };
 
 export type ProductVariant = {
@@ -39,6 +40,7 @@ export type ProductVariant = {
   label: string;
   productName: string;
   pointValue: number;
+  previousPointValue?: number | null;
   saleCount: number;
 };
 
@@ -258,6 +260,7 @@ export function groupProductsIntoFamilies(products: SearchableProduct[], limit?:
       label: product.variant_display_shortcut?.trim() || (product.variant_label ? displayLabelForDbVariant(product.variant_label) : variantLabelForProduct(product.product_name, familyName)),
       productName: product.product_name,
       pointValue,
+      previousPointValue: product.previous_point_value ?? null,
       saleCount,
     };
     const duplicateIndex = family.variants.findIndex((variant) => normalizeProductQuery(variant.label) === normalizeProductQuery(candidate.label));

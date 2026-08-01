@@ -37,6 +37,14 @@ describe('product family grouping for main-page variant logger', () => {
     expect(family.variants[0].label).not.toContain('pt');
   });
 
+  it('preserves the previous-month point value on each grouped variant', () => {
+    const [family] = groupProductsIntoFamilies([
+      { ...product(1, '口内炎パッチ', 100), previous_point_value: 80 },
+    ]);
+
+    expect(family.variants[0]).toMatchObject({ productId: 1, pointValue: 100, previousPointValue: 80 });
+  });
+
   it('keeps 0pt variants visible so Home can ask for points before logging', () => {
     const families = groupProductsIntoFamilies([
       product(1, 'フェイタスZα 7枚', 0),

@@ -54,6 +54,9 @@ const copy = {
     searching: 'Searching...',
     error: 'Could not log product',
     tapAgain: 'Tap again',
+    previousPointsToggle: 'Show previous-month points',
+    previousPoints: 'Previous',
+    previousNotEligible: 'Not eligible',
   },
   ja: {
     aria: '商品検索記録',
@@ -82,6 +85,9 @@ const copy = {
     searching: '検索中...',
     error: '記録できませんでした',
     tapAgain: 'もう一度タップ',
+    previousPointsToggle: '先月の点数も表示',
+    previousPoints: '先月',
+    previousNotEligible: '対象外',
   },
 } satisfies Record<Language, Record<string, string>>;
 
@@ -131,6 +137,7 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
   const [isSavingPoints, setIsSavingPoints] = useState(false);
   const [logAfterPointSave, setLogAfterPointSave] = useState(false);
   const [pointOverrides, setPointOverrides] = useState<Record<string, number>>({});
+  const [showPreviousPoints, setShowPreviousPoints] = useState(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
   const t = copy[language];
@@ -181,6 +188,18 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
   function pointValueFor(variant: ProductVariant) {
     return pointOverrides[busyKeyFor(variant)] ?? variant.pointValue;
   }
+
+  function previousPointValue(variant: ProductVariant) {
+    const points = variant.previousPointValue ?? 0;
+    return points > 0 ? `${t.previousPoints} ${points}pt` : `${t.previousPoints} ${t.previousNotEligible}`;
+  }
+
+  const previousPointsToggle = (
+    <label className="previous-points-toggle">
+      <input type="checkbox" checked={showPreviousPoints} onChange={(event) => setShowPreviousPoints(event.target.checked)} />
+      <span>{t.previousPointsToggle}</span>
+    </label>
+  );
 
   function cancelLongPress() {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
@@ -372,6 +391,7 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
               <h2>{t.resultsTitle}</h2>
               <p>{t.resultsHelp}</p>
             </div>
+            {previousPointsToggle}
           </div>
           <div className="family-list search-results">
             {families.map((family, index) => (
@@ -397,6 +417,7 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
                       >
                         <span className="variant-label">{variantDisplayLabel(variant, family, language)}</span>
                         <small className="variant-points">{pointValueFor(variant) > 0 ? `${pointValueFor(variant)}pt` : t.unassignedPoints}</small>
+                        {showPreviousPoints ? <small className="variant-previous-points">{previousPointValue(variant)}</small> : null}
                       </button>
                     );
                   })}
@@ -439,6 +460,7 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
               <h2><span className="paw-icon" aria-hidden="true" />{t.mostlyUsedTitle}</h2>
               <p>{t.longPressHelp}</p>
             </div>
+            {previousPointsToggle}
           </div>
           <div className="family-list mostly-used-list">
             {mostlyUsedFamilies.map((family, index) => (
@@ -464,6 +486,7 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
                       >
                         <span className="variant-label">{variantDisplayLabel(variant, family, language)}</span>
                         <small className="variant-points">{pointValueFor(variant) > 0 ? `${pointValueFor(variant)}pt` : t.unassignedPoints}</small>
+                        {showPreviousPoints ? <small className="variant-previous-points">{previousPointValue(variant)}</small> : null}
                       </button>
                     );
                   })}

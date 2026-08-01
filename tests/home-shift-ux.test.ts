@@ -34,6 +34,14 @@ describe('home shift-speed UI contract', () => {
     expect(css).toMatch(/\.shift-log-panel \.variant-button\s*{[^}]*display:\s*grid/s);
   });
 
+  it('lets PWA users reveal previous-month points on both product lists while logging current points', () => {
+    const logger = source('components/SearchProductLogger.tsx');
+    expect(logger).toContain('先月の点数も表示');
+    expect(logger).toContain('showPreviousPoints');
+    expect(logger.match(/previousPointValue/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+    expect(logger).toContain('pointValue: assignedPoints ?? pointValueFor(variant)');
+  });
+
   it('uses sticky search and intentional empty states on the home page', () => {
     const logger = source('components/SearchProductLogger.tsx');
     const client = source('components/HomeShiftLoggerClient.tsx');

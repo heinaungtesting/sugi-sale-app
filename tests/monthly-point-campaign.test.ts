@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { getNextTokyoMonthKey, getTokyoMonthKey } from '../lib/sugi-admin-db';
+import { getNextTokyoMonthKey, getPreviousTokyoMonthKey, getTokyoMonthKey } from '../lib/sugi-admin-db';
 
 const source = (path: string) => readFileSync(join(process.cwd(), path), 'utf8');
 
@@ -12,6 +12,14 @@ describe('monthly point campaign staging', () => {
     expect(getTokyoMonthKey(new Date('2026-06-30T15:00:00Z'))).toBe('2026-07');
     expect(getNextTokyoMonthKey(new Date('2026-06-30T14:59:00Z'))).toBe('2026-07');
     expect(getNextTokyoMonthKey(new Date('2026-12-15T00:00:00Z'))).toBe('2027-01');
+    expect(getPreviousTokyoMonthKey(new Date('2026-01-15T00:00:00Z'))).toBe('2025-12');
+  });
+
+  it('returns previous-month campaign points with every searchable product row', () => {
+    const sugiDb = source('lib/sugi-db.ts');
+    expect(sugiDb).toContain('getPreviousTokyoMonthKey');
+    expect(sugiDb).toContain('previous_point_value');
+    expect(sugiDb).toContain('sugi_point_campaign_items previous_campaign');
   });
 
   it('has schema and lazy activation for next-month point campaigns', () => {

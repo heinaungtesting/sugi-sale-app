@@ -1,5 +1,5 @@
 import { pool, query, queryOne } from './db';
-import { applyDueMonthlyPointCampaigns } from './sugi-admin-db';
+import { applyDueMonthlyPointCampaigns, getPreviousTokyoMonthKey } from './sugi-admin-db';
 import { applyDefaultProductAliases, categoryLabel, isLoggableProduct, normalizeProductCategory, rankProductsForSearch, type Category, type Product, type SearchableProduct, type TodaySale } from './sugi-domain';
 import { buildQuickProductPlan } from './product-creation';
 import { syncProductPointValue, syncVariantPointValue, syncVariantPointValueBySaleName } from './sugi-point-sync';
@@ -118,6 +118,7 @@ function rowToProduct(r: {
   variant_display_shortcut?: string | null;
   variant_point_value?: number | null;
   variant_nicknames?: string[] | null;
+  previous_point_value?: number | null;
 }): SearchableProduct {
   return {
     id: Number(r.id),
@@ -131,6 +132,7 @@ function rowToProduct(r: {
     variant_display_shortcut: r.variant_display_shortcut ?? null,
     variant_point_value: r.variant_point_value === null || r.variant_point_value === undefined ? null : Number(r.variant_point_value),
     variant_aliases: r.variant_nicknames ?? [],
+    previous_point_value: r.previous_point_value === null || r.previous_point_value === undefined ? null : Number(r.previous_point_value),
   };
 }
 
@@ -147,6 +149,7 @@ type SearchableProductRow = {
   variant_display_shortcut: string | null;
   variant_point_value: number | null;
   variant_nicknames: string[] | null;
+  previous_point_value: number | null;
 };
 
 function normalizeSearchParam(search: string): string {
@@ -160,6 +163,7 @@ function hydrateSearchRows(rows: SearchableProductRow[]): SearchableProduct[] {
 export async function listSearchableProducts(userId: number, search = '', limit = 60): Promise<SearchableProduct[]> {
  await applyDueMonthlyPointCampaigns();
  const normalizedSearch = normalizeSearchParam(search);
+ const previousMonth = getPreviousTokyoMonthKey();
   const safeLimit = Math.max(1, Math.min(Number(limit) || 60, normalizedSearch ? 200 : 1000));
   const rows = await query<SearchableProductRow>(
     `WITH sale_counts AS (
@@ -175,10 +179,18 @@ export async function listSearchableProducts(userId: number, search = '', limit 
             pv.display_shortcut AS variant_display_shortcut,
             pv.point_value AS variant_point_value,
             pv.nicknames AS variant_nicknames,
+            previous_campaign.point_value AS previous_point_value,
             COALESCE(sc.sale_count, 0)::text AS sale_count
      FROM products p
      LEFT JOIN product_variants pv ON pv.product_id = p.id AND pv.is_active = TRUE
      LEFT JOIN sale_counts sc ON sc.product_id = p.id
+     LEFT JOIN sugi_point_campaign_items previous_campaign
+       ON previous_campaign.campaign_month = $4
+      AND previous_campaign.product_id = p.id
+      AND (
+        (pv.id IS NULL AND previous_campaign.target_type = 'product' AND previous_campaign.variant_id IS NULL) OR
+        (pv.id IS NOT NULL AND previous_campaign.target_type = 'variant' AND previous_campaign.variant_id = pv.id)
+      )
      WHERE p.is_active = TRUE
        AND (p.user_id IS NULL OR p.user_id = $1)
        AND (
@@ -192,7 +204,7 @@ export async function listSearchableProducts(userId: number, search = '', limit 
        )
      ORDER BY COALESCE(sc.sale_count, 0) DESC, p.product_name, pv.unit_count NULLS LAST, pv.id
      LIMIT $3`,
-    [userId, normalizedSearch, normalizedSearch ? Math.max(safeLimit * 5, 100) : 1000]
+    [userId, normalizedSearch, normalizedSearch ? Math.max(safeLimit * 5, 100) : 1000, previousMonth]
   );
   const products = hydrateSearchRows(rows);
   return rankProductsForSearch(products, search, safeLimit);

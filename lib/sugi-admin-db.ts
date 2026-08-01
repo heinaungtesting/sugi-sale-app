@@ -216,6 +216,12 @@ export function getNextTokyoMonthKey(now = new Date()): string {
  return `${next.year}-${String(next.month).padStart(2, '0')}`;
 }
 
+export function getPreviousTokyoMonthKey(now = new Date()): string {
+ const [year, month] = getTokyoMonthKey(now).split('-').map(Number);
+ const previous = month === 1 ? { year: year - 1, month: 12 } : { year, month: month - 1 };
+ return `${previous.year}-${String(previous.month).padStart(2, '0')}`;
+}
+
 function normalizeKey(value: string): string {
  return value.normalize('NFKC').replace(/\s+/g, '').trim().toLowerCase();
 }
