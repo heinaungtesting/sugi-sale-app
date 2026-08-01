@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import productCatalog from '@/data/local-product-catalog.json';
+import catalogMeta from '@/data/local-product-catalog-meta.json';
 import {
   addCustomProduct,
   addLocalSale,
@@ -61,6 +62,7 @@ export function LocalOnlyApp() {
   const [view, setView] = useState<View>('home');
   const [query, setQuery] = useState('');
   const [visibleFamilyLimit, setVisibleFamilyLimit] = useState(LOCAL_PRODUCT_PAGE_SIZE);
+  const [showPreviousPoints, setShowPreviousPoints] = useState(false);
   const [setupName, setSetupName] = useState('');
   const [productName, setProductName] = useState('');
   const [productPoints, setProductPoints] = useState('');
@@ -318,7 +320,14 @@ export function LocalOnlyApp() {
             />
           </section>
           <section aria-label="商品一覧">
-            <div className="section-heading-row"><div><h2>{query.trim() ? '検索結果' : '商品一覧'}</h2><p>タップするとすぐ端末内に記録します。</p></div></div>
+            <div className="section-heading-row local-product-heading">
+              <div><h2>{query.trim() ? '検索結果' : '商品一覧'}</h2><p>タップすると今月の点数で端末内に記録します。</p></div>
+              <label className="local-previous-points-toggle">
+                <input type="checkbox" checked={showPreviousPoints} onChange={(event) => setShowPreviousPoints(event.target.checked)} />
+                <span>先月の点数も表示</span>
+              </label>
+            </div>
+            {showPreviousPoints ? <p className="local-previous-points-note">{catalogMeta.previous_month.replace('-', '年')}月の点数です。記録には今月の点数を使います。</p> : null}
             <div className="family-list mostly-used-list">
               {allFamilies.length > 0 ? (
                 <div className="local-product-result-count" aria-live="polite">
@@ -336,7 +345,10 @@ export function LocalOnlyApp() {
                       return (
                         <button key={key} className="variant-button sale-tap-button" disabled={isDebouncing} aria-busy={isDebouncing} onClick={() => void logVariant(variant)}>
                           <span>{label}</span>
-                          <small>{variant.pointValue.toLocaleString()}pt</small>
+                          <small className="local-current-points">今月 {variant.pointValue.toLocaleString()}pt</small>
+                          {showPreviousPoints ? (
+                            <small className="local-previous-points">先月 {variant.previousPointValue && variant.previousPointValue > 0 ? `${variant.previousPointValue.toLocaleString()}pt` : '対象外'}</small>
+                          ) : null}
                         </button>
                       );
                     })}

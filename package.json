@@ -1,6 +1,6 @@
 {
   "name": "sugi-sale-app",
-  "version": "1.4.8",
+  "version": "1.4.9",
   "private": true,
   "description": "Mobile-first multi-user Sugi sale logger",
   "scripts": {
@@ -12,7 +12,8 @@
     "migrate": "tsx scripts/migrate.ts",
     "seed:user": "tsx scripts/create-user.ts",
     "backup": "bash scripts/backup-db.sh",
-    "restore": "bash scripts/restore-db.sh"
+    "restore": "bash scripts/restore-db.sh",
+    "snapshot:previous-points": "node scripts/snapshot-local-point-history.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
