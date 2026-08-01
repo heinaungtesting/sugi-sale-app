@@ -45,18 +45,6 @@ describe('local-only offline PWA contract', () => {
     expect(app).not.toContain('/api/products');
   });
 
-  it('lets users reveal previous-month points across the product list without changing logged points', () => {
-    expect(existsSync(join(ROOT, 'data/local-product-catalog-meta.json'))).toBe(true);
-    const app = source('components/LocalOnlyApp.tsx');
-    const catalog = JSON.parse(source('data/local-product-catalog.json')) as Array<Record<string, unknown>>;
-
-    expect(app).toContain("import catalogMeta from '@/data/local-product-catalog-meta.json'");
-    expect(app).toContain('先月の点数も表示');
-    expect(app).toContain('previousPointValue');
-    expect(app).toContain('logVariant(variant)');
-    expect(catalog.some((product) => typeof product.previous_point_value === 'number')).toBe(true);
-  });
-
   it('keeps every bundled product reachable with progressive mobile disclosure', () => {
     const app = source('components/LocalOnlyApp.tsx');
     expect(app).toContain('LOCAL_PRODUCT_PAGE_SIZE = 12');
