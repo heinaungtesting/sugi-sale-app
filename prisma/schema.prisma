@@ -9,23 +9,24 @@ datasource db {
 }
 
 model SugiUser {
-  id                       BigInt                   @id @default(autoincrement())
-  username                 String                   @unique
-  displayName              String                   @map("display_name")
-  pinHash                  String                   @map("pin_hash")
-  role                     String                   @default("user")
-  isActive                 Boolean                  @default(true) @map("is_active")
-  feedbackPromptSeenAt     DateTime?                @map("feedback_prompt_seen_at") @db.Timestamptz(6)
-  navigationV9PromptSeenAt DateTime?                @map("navigation_v9_prompt_seen_at") @db.Timestamptz(6)
-  createdAt                DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                DateTime                 @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id                       BigInt                     @id @default(autoincrement())
+  username                 String                     @unique
+  displayName              String                     @map("display_name")
+  pinHash                  String                     @map("pin_hash")
+  role                     String                     @default("user")
+  isActive                 Boolean                    @default(true) @map("is_active")
+  feedbackPromptSeenAt     DateTime?                  @map("feedback_prompt_seen_at") @db.Timestamptz(6)
+  navigationV9PromptSeenAt DateTime?                  @map("navigation_v9_prompt_seen_at") @db.Timestamptz(6)
+  createdAt                DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime                   @default(now()) @map("updated_at") @db.Timestamptz(6)
   sessions                 SugiSession[]
   feedback                 SugiFeedback[]
   products                 Product[]
   sales                    SalesLog[]
   receipts                 SaleIdempotencyReceipt[]
-  activitySubjects         SugiActivityLog[]        @relation("ActivitySubject")
-  activityActors           SugiActivityLog[]        @relation("ActivityActor")
+  activitySubjects         SugiActivityLog[]          @relation("ActivitySubject")
+  activityActors           SugiActivityLog[]          @relation("ActivityActor")
+  reviewedFeatureItems     ProductUniqueFeatureItem[]
 
   @@map("sugi_users")
   @@schema("sugi")
@@ -125,20 +126,25 @@ model SugiFeedback {
 }
 
 model Product {
-  id            BigInt                  @id @default(autoincrement())
-  productName   String                  @unique @map("product_name")
-  category      String                  @default("ヘルスケア")
-  pointValue    Int                     @default(0) @map("point_value")
-  nicknames     String[]                @default([])
-  isActive      Boolean                 @default(true) @map("is_active")
-  userId        BigInt?                 @map("user_id")
-  sourceUrl     String?                 @map("source_url")
-  createdAt     DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
-  owner         SugiUser?               @relation(fields: [userId], references: [id], onDelete: NoAction)
-  variants      ProductVariant[]
-  sales         SalesLog[]
-  campaignItems SugiPointCampaignItem[]
+  id                 BigInt                     @id @default(autoincrement())
+  productName        String                     @unique @map("product_name")
+  category           String                     @default("ヘルスケア")
+  pointValue         Int                        @default(0) @map("point_value")
+  nicknames          String[]                   @default([])
+  isActive           Boolean                    @default(true) @map("is_active")
+  userId             BigInt?                    @map("user_id")
+  sourceUrl          String?                    @map("source_url")
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                   @default(now()) @map("updated_at") @db.Timestamptz(6)
+  owner              SugiUser?                  @relation(fields: [userId], references: [id], onDelete: NoAction)
+  variants           ProductVariant[]
+  sales              SalesLog[]
+  campaignItems      SugiPointCampaignItem[]
+  enrichmentSources  EnrichmentSource[]
+  enrichmentJobs     EnrichmentJob[]
+  uniqueFeatureItems ProductUniqueFeatureItem[]
+  uniqueSummary      ProductUniqueSummary?
+  enrichmentAudits   EnrichmentAudit[]
 
   @@index([userId, category, isActive], map: "idx_products_user_category")
   @@index([userId, isActive, productName], map: "idx_products_active_visible")
@@ -147,18 +153,19 @@ model Product {
 }
 
 model ProductVariant {
-  id              BigInt                  @id @default(autoincrement())
-  productId       BigInt                  @map("product_id")
-  variantLabel    String                  @map("variant_label")
-  displayShortcut String?                 @map("display_shortcut")
-  unitCount       Int                     @default(1) @map("unit_count")
-  pointValue      Int                     @default(0) @map("point_value")
-  nicknames       String[]                @default([])
-  isActive        Boolean                 @default(true) @map("is_active")
-  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
-  product         Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
-  campaignItems   SugiPointCampaignItem[]
+  id                 BigInt                     @id @default(autoincrement())
+  productId          BigInt                     @map("product_id")
+  variantLabel       String                     @map("variant_label")
+  displayShortcut    String?                    @map("display_shortcut")
+  unitCount          Int                        @default(1) @map("unit_count")
+  pointValue         Int                        @default(0) @map("point_value")
+  nicknames          String[]                   @default([])
+  isActive           Boolean                    @default(true) @map("is_active")
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                   @default(now()) @map("updated_at") @db.Timestamptz(6)
+  product            Product                    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  campaignItems      SugiPointCampaignItem[]
+  uniqueFeatureItems ProductUniqueFeatureItem[]
 
   @@unique([productId, variantLabel])
   @@map("product_variants")
@@ -197,5 +204,111 @@ model SaleIdempotencyReceipt {
   @@id([userId, idempotencyKey])
   @@index([saleId], map: "idx_sale_idempotency_receipts_sale")
   @@map("sale_idempotency_receipts")
+  @@schema("sugi")
+}
+
+model EnrichmentSource {
+  id          BigInt    @id @default(autoincrement())
+  productId   BigInt    @map("product_id")
+  url         String
+  domain      String    @default(dbgenerated())
+  sourceType  String    @default("product_page") @map("source_type")
+  isOfficial  Boolean   @default(false) @map("is_official")
+  fetchedAt   DateTime? @map("fetched_at") @db.Timestamptz(6)
+  fetchStatus String    @default("pending") @map("fetch_status")
+  httpStatus  Int?      @map("http_status")
+  rawMarkdown String?   @map("raw_markdown")
+  rawBytes    Int?      @map("raw_bytes")
+  contentHash String?   @map("content_hash")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  product     Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, url])
+  @@index([productId, fetchStatus], map: "idx_enrichment_sources_product")
+  @@map("enrichment_sources")
+  @@schema("sugi")
+}
+
+model EnrichmentJob {
+  id          BigInt            @id @default(autoincrement())
+  productId   BigInt            @map("product_id")
+  runId       String            @map("run_id")
+  status      String            @default("queued")
+  priority    Int               @default(100) @db.SmallInt
+  attempts    Int               @default(0) @db.SmallInt
+  maxAttempts Int               @default(3) @map("max_attempts") @db.SmallInt
+  nextRunAt   DateTime          @default(now()) @map("next_run_at") @db.Timestamptz(6)
+  lockedBy    String?           @map("locked_by")
+  lockedAt    DateTime?         @map("locked_at") @db.Timestamptz(6)
+  lastError   String?           @map("last_error")
+  startedAt   DateTime?         @map("started_at") @db.Timestamptz(6)
+  finishedAt  DateTime?         @map("finished_at") @db.Timestamptz(6)
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  product     Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  audits      EnrichmentAudit[]
+
+  @@unique([productId, runId])
+  @@map("enrichment_jobs")
+  @@schema("sugi")
+}
+
+model ProductUniqueFeatureItem {
+  id            BigInt          @id @default(autoincrement())
+  productId     BigInt          @map("product_id")
+  variantId     BigInt?         @map("variant_id")
+  featureKey    String          @map("feature_key")
+  headline      String
+  detail        String?
+  language      String          @default("ja")
+  confidence    Float           @db.Real
+  sourceIds     BigInt[]        @default([]) @map("source_ids")
+  isManual      Boolean         @default(false) @map("is_manual")
+  isPublished   Boolean         @default(false) @map("is_published")
+  reviewedBy    BigInt?         @map("reviewed_by")
+  reviewedAt    DateTime?       @map("reviewed_at") @db.Timestamptz(6)
+  generatedBy   String          @default("enrich-worker") @map("generated_by")
+  modelId       String?         @map("model_id")
+  promptVersion String?         @map("prompt_version")
+  createdAt     DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime        @default(now()) @map("updated_at") @db.Timestamptz(6)
+  product       Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant       ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  reviewer      SugiUser?       @relation(fields: [reviewedBy], references: [id], onDelete: NoAction)
+
+  @@map("product_unique_feature_items")
+  @@schema("sugi")
+}
+
+model ProductUniqueSummary {
+  productId     BigInt   @id @map("product_id")
+  oneLiner      String   @map("one_liner")
+  bulletPoints  String[] @map("bullet_points")
+  language      String   @default("ja")
+  confidence    Float    @db.Real
+  sourceIds     BigInt[] @default([]) @map("source_ids")
+  generatedBy   String   @default("enrich-worker") @map("generated_by")
+  modelId       String?  @map("model_id")
+  promptVersion String?  @map("prompt_version")
+  generatedAt   DateTime @default(now()) @map("generated_at") @db.Timestamptz(6)
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  product       Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@map("product_unique_summaries")
+  @@schema("sugi")
+}
+
+model EnrichmentAudit {
+  id        BigInt         @id @default(autoincrement())
+  jobId     BigInt?        @map("job_id")
+  productId BigInt?        @map("product_id")
+  event     String
+  actor     String
+  details   Json           @default("{}") @db.JsonB
+  createdAt DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  job       EnrichmentJob? @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  product   Product?       @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, createdAt(sort: Desc)], map: "idx_enrichment_audit_product")
+  @@map("enrichment_audit")
   @@schema("sugi")
 }

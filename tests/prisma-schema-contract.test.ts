@@ -17,6 +17,11 @@ describe('Prisma schema contract', () => {
     ['ProductVariant', 'product_variants'],
     ['SalesLog', 'sales_logs'],
     ['SaleIdempotencyReceipt', 'sale_idempotency_receipts'],
+    ['EnrichmentSource', 'enrichment_sources'],
+    ['EnrichmentJob', 'enrichment_jobs'],
+    ['ProductUniqueFeatureItem', 'product_unique_feature_items'],
+    ['ProductUniqueSummary', 'product_unique_summaries'],
+    ['EnrichmentAudit', 'enrichment_audit'],
   ] as const;
 
   it.each(models)('maps %s to %s', (model, table) => {
@@ -36,5 +41,18 @@ describe('Prisma schema contract', () => {
   it('preserves descending created-at feedback indexes from the migration', () => {
     expect(schema).toContain('@@index([userId, createdAt(sort: Desc)], map: "idx_sugi_feedback_user_created")');
     expect(schema).toContain('@@index([status, createdAt(sort: Desc)], map: "idx_sugi_feedback_status_created")');
+  });
+
+  it('maps enrichment native fields and database-maintained values', () => {
+    expect(schema).toMatch(
+      /model ProductUniqueFeatureItem \{[\s\S]*?sourceIds\s+BigInt\[\]\s+@default\(\[\]\)\s+@map\("source_ids"\)/,
+    );
+    expect(schema.match(/confidence\s+Float\s+@db\.Real/g)).toHaveLength(2);
+    expect(schema).toMatch(
+      /model EnrichmentAudit \{[\s\S]*?details\s+Json\s+@default\("\{\}"\)\s+@db\.JsonB/,
+    );
+    expect(schema).toMatch(
+      /model EnrichmentSource \{[\s\S]*?domain\s+String\s+@default\(dbgenerated\(\)\)/,
+    );
   });
 });
