@@ -1,0 +1,201 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["sugi"]
+}
+
+model SugiUser {
+  id                       BigInt                   @id @default(autoincrement())
+  username                 String                   @unique
+  displayName              String                   @map("display_name")
+  pinHash                  String                   @map("pin_hash")
+  role                     String                   @default("user")
+  isActive                 Boolean                  @default(true) @map("is_active")
+  feedbackPromptSeenAt     DateTime?                @map("feedback_prompt_seen_at") @db.Timestamptz(6)
+  navigationV9PromptSeenAt DateTime?                @map("navigation_v9_prompt_seen_at") @db.Timestamptz(6)
+  createdAt                DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime                 @default(now()) @map("updated_at") @db.Timestamptz(6)
+  sessions                 SugiSession[]
+  feedback                 SugiFeedback[]
+  products                 Product[]
+  sales                    SalesLog[]
+  receipts                 SaleIdempotencyReceipt[]
+  activitySubjects         SugiActivityLog[]        @relation("ActivitySubject")
+  activityActors           SugiActivityLog[]        @relation("ActivityActor")
+
+  @@map("sugi_users")
+  @@schema("sugi")
+}
+
+model SugiSession {
+  jti         String    @id
+  userId      BigInt    @map("user_id")
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  lastUsedAt  DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  userAgent   String    @default("") @map("user_agent")
+  deviceLabel String    @default("Unknown device") @map("device_label")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user        SugiUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sugi_sessions")
+  @@schema("sugi")
+}
+
+model SugiRateLimit {
+  scope           String
+  subjectKey      String   @map("subject_key")
+  requestCount    Int      @default(0) @map("request_count")
+  windowStartedAt DateTime @default(now()) @map("window_started_at") @db.Timestamptz(6)
+  expiresAt       DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@id([scope, subjectKey])
+  @@index([expiresAt], map: "idx_sugi_rate_limits_expiry")
+  @@map("sugi_rate_limits")
+  @@schema("sugi")
+}
+
+model SugiPointCampaign {
+  campaignMonth String                  @id @map("campaign_month")
+  replaceAll    Boolean                 @default(true) @map("replace_all")
+  status        String                  @default("staged")
+  createdAt     DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  appliedAt     DateTime?               @map("applied_at") @db.Timestamptz(6)
+  items         SugiPointCampaignItem[]
+
+  @@map("sugi_point_campaigns")
+  @@schema("sugi")
+}
+
+model SugiPointCampaignItem {
+  id            BigInt            @id @default(autoincrement())
+  campaignMonth String            @map("campaign_month")
+  targetType    String            @map("target_type")
+  productId     BigInt            @map("product_id")
+  variantId     BigInt?           @map("variant_id")
+  productName   String            @map("product_name")
+  variantLabel  String?           @map("variant_label")
+  pointValue    Int               @map("point_value")
+  aliases       String[]          @default([])
+  source        Json?
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  campaign      SugiPointCampaign @relation(fields: [campaignMonth], references: [campaignMonth], onDelete: Cascade)
+  product       Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variant       ProductVariant?   @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([campaignMonth], map: "idx_sugi_point_campaign_items_month")
+  @@map("sugi_point_campaign_items")
+  @@schema("sugi")
+}
+
+model SugiActivityLog {
+  id          BigInt    @id @default(autoincrement())
+  userId      BigInt?   @map("user_id")
+  actorUserId BigInt?   @map("actor_user_id")
+  action      String
+  summary     String
+  details     Json      @default("{}")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  subject     SugiUser? @relation("ActivitySubject", fields: [userId], references: [id], onDelete: SetNull)
+  actor       SugiUser? @relation("ActivityActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)], map: "idx_sugi_activity_logs_created")
+  @@index([userId, createdAt(sort: Desc)], map: "idx_sugi_activity_logs_user")
+  @@map("sugi_activity_logs")
+  @@schema("sugi")
+}
+
+model SugiFeedback {
+  id        BigInt   @id @default(autoincrement())
+  userId    BigInt   @map("user_id")
+  category  String
+  message   String
+  status    String   @default("未確認")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      SugiUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt], map: "idx_sugi_feedback_user_created")
+  @@index([status, createdAt], map: "idx_sugi_feedback_status_created")
+  @@map("sugi_feedback")
+  @@schema("sugi")
+}
+
+model Product {
+  id            BigInt                  @id @default(autoincrement())
+  productName   String                  @unique @map("product_name")
+  category      String                  @default("ヘルスケア")
+  pointValue    Int                     @default(0) @map("point_value")
+  nicknames     String[]                @default([])
+  isActive      Boolean                 @default(true) @map("is_active")
+  userId        BigInt?                 @map("user_id")
+  sourceUrl     String?                 @map("source_url")
+  createdAt     DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
+  owner         SugiUser?               @relation(fields: [userId], references: [id], onDelete: NoAction)
+  variants      ProductVariant[]
+  sales         SalesLog[]
+  campaignItems SugiPointCampaignItem[]
+
+  @@index([userId, category, isActive], map: "idx_products_user_category")
+  @@index([userId, isActive, productName], map: "idx_products_active_visible")
+  @@map("products")
+  @@schema("sugi")
+}
+
+model ProductVariant {
+  id              BigInt                  @id @default(autoincrement())
+  productId       BigInt                  @map("product_id")
+  variantLabel    String                  @map("variant_label")
+  displayShortcut String?                 @map("display_shortcut")
+  unitCount       Int                     @default(1) @map("unit_count")
+  pointValue      Int                     @default(0) @map("point_value")
+  nicknames       String[]                @default([])
+  isActive        Boolean                 @default(true) @map("is_active")
+  createdAt       DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                @default(now()) @map("updated_at") @db.Timestamptz(6)
+  product         Product                 @relation(fields: [productId], references: [id], onDelete: Cascade)
+  campaignItems   SugiPointCampaignItem[]
+
+  @@unique([productId, variantLabel])
+  @@map("product_variants")
+  @@schema("sugi")
+}
+
+model SalesLog {
+  id             BigInt                   @id @default(autoincrement())
+  soldDate       DateTime                 @default(dbgenerated()) @map("sold_date") @db.Date
+  userId         BigInt?                  @map("user_id")
+  productId      BigInt?                  @map("product_id")
+  productName    String                   @map("product_name")
+  quantity       Int                      @default(1)
+  pointsPerItem  Int                      @map("points_per_item")
+  totalPoints    Int                      @default(dbgenerated()) @map("total_points")
+  idempotencyKey String?                  @map("idempotency_key")
+  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  user           SugiUser?                @relation(fields: [userId], references: [id], onDelete: NoAction)
+  product        Product?                 @relation(fields: [productId], references: [id], onDelete: SetNull)
+  receipts       SaleIdempotencyReceipt[]
+
+  @@index([userId, soldDate, createdAt(sort: Desc)], map: "idx_sales_logs_user_date")
+  @@index([userId, productId], map: "idx_sales_logs_user_product")
+  @@map("sales_logs")
+  @@schema("sugi")
+}
+
+model SaleIdempotencyReceipt {
+  userId         BigInt    @map("user_id")
+  idempotencyKey String    @map("idempotency_key")
+  saleId         BigInt?   @map("sale_id")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user           SugiUser  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sale           SalesLog? @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, idempotencyKey])
+  @@index([saleId], map: "idx_sale_idempotency_receipts_sale")
+  @@map("sale_idempotency_receipts")
+  @@schema("sugi")
+}
