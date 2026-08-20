@@ -32,4 +32,9 @@ describe('Prisma schema contract', () => {
     expect(schema).toMatch(/nicknames\s+String\[\]/);
     expect(schema).toMatch(/id\s+BigInt\s+@id\s+@default\(autoincrement\(\)\)/);
   });
+
+  it('preserves descending created-at feedback indexes from the migration', () => {
+    expect(schema).toContain('@@index([userId, createdAt(sort: Desc)], map: "idx_sugi_feedback_user_created")');
+    expect(schema).toContain('@@index([status, createdAt(sort: Desc)], map: "idx_sugi_feedback_status_created")');
+  });
 });
