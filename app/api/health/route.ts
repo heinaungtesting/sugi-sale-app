@@ -1,4 +1,3 @@
-import { queryOne } from '@/lib/db';
 import { getBuildInfo } from '@/lib/build-info';
 import { incrementMetric, observeMetric } from '@/infrastructure/observability/metrics';
 import { logEvent } from '@/infrastructure/logging/structured-logger';
@@ -11,7 +10,9 @@ export async function GET() {
   const started = performance.now();
   const build = getBuildInfo();
   try {
-    const db = await queryOne<HealthRow>('SELECT 1 AS ok');
+    const { prisma } = await import('@/lib/prisma');
+    const rows = await prisma.$queryRaw<HealthRow[]>`SELECT 1 AS ok`;
+    const db = rows[0];
     if (db?.ok !== 1) {
       return Response.json({ ok: false, database: 'unexpected-result', ...build }, { status: 503 });
     }
