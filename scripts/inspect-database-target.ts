@@ -114,11 +114,9 @@ export function describeDatabaseTarget(url: string): DatabaseTargetDescription {
 
 export function loadDatabaseTargetEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
-  dotenvLoader: () => void = () => {
-    loadDotenv();
-  },
+  dotenvLoader: (options: { quiet: true }) => void = loadDotenv,
 ): NodeJS.ProcessEnv {
-  dotenvLoader();
+  dotenvLoader({ quiet: true });
   return environment;
 }
 

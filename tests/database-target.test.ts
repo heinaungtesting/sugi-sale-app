@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   databaseTargetInspectionFailureMessage,
   describeDatabaseTarget,
@@ -76,6 +76,14 @@ describe('database target inspection', () => {
     expect(selectDatabaseTargetUrl('DIRECT_URL', environment)).toBe(
       'postgresql://app:controlled-secret@db.project.supabase.co/postgres',
     );
+  });
+
+  it('loads dotenv quietly so JSON is the only successful CLI output', () => {
+    const dotenvLoader = vi.fn();
+
+    loadDatabaseTargetEnvironment({} as NodeJS.ProcessEnv, dotenvLoader);
+
+    expect(dotenvLoader).toHaveBeenCalledWith({ quiet: true });
   });
 
   it('formats only safe fields and sorts inspection identifiers', () => {
