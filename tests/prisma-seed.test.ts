@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatCatalogSeedSummary,
+  loadCatalogSeedPrisma,
   normalizeCatalog,
   seedCatalog,
   type CatalogSeedClient,
@@ -136,6 +137,33 @@ describe('catalog seed normalization', () => {
 });
 
 describe('catalog seed execution', () => {
+  it('loads dotenv quietly before importing Prisma', async () => {
+    const originalDatabaseUrl = process.env.DATABASE_URL;
+    const order: string[] = [];
+    delete process.env.DATABASE_URL;
+
+    try {
+      const module = await loadCatalogSeedPrisma(
+        (options) => {
+          expect(options).toEqual({ quiet: true });
+          order.push('environment');
+          process.env.DATABASE_URL = 'postgresql://seed-test.invalid/sugi';
+        },
+        async () => {
+          if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL was not loaded first');
+          order.push('prisma');
+          return { prisma: 'loaded-after-environment' };
+        },
+      );
+
+      expect(module).toEqual({ prisma: 'loaded-after-environment' });
+      expect(order).toEqual(['environment', 'prisma']);
+    } finally {
+      if (originalDatabaseUrl === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = originalDatabaseUrl;
+    }
+  });
+
   it('uses stable logical upsert keys and is idempotent without deleting unrelated rows', async () => {
     const catalog = normalizeCatalog([
       row(),

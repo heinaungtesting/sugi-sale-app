@@ -1,4 +1,5 @@
 import catalogSource from '../data/local-product-catalog.json';
+import { config as loadDotenv } from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 
@@ -107,6 +108,16 @@ export type CatalogSeedCounts = {
   updated: number;
   skipped: number;
   total: number;
+};
+
+export type CatalogSeedEnvironmentLoader = (options: { quiet: true }) => unknown | Promise<unknown>;
+
+export const loadCatalogSeedPrisma = async <T>(
+  environmentLoader: CatalogSeedEnvironmentLoader,
+  prismaLoader: () => Promise<T>,
+): Promise<T> => {
+  await environmentLoader({ quiet: true });
+  return prismaLoader();
 };
 
 const sourceFields = [
@@ -360,7 +371,10 @@ export const formatCatalogSeedSummary = (summary: CatalogSeedSummary) =>
   + `catalog seed variants inserted=${summary.variants.inserted} updated=${summary.variants.updated} skipped=${summary.variants.skipped} total=${summary.variants.total}`;
 
 const main = async () => {
-  const { prisma } = await import('../lib/prisma');
+  const { prisma } = await loadCatalogSeedPrisma(
+    (options) => loadDotenv(options),
+    () => import('../lib/prisma'),
+  );
   try {
     const summary = await seedCatalog(prisma, normalizeCatalog(catalogSource));
     console.log(formatCatalogSeedSummary(summary));
