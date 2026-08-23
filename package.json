@@ -13,6 +13,7 @@
     "verify:prisma-schema": "tsx scripts/verify-prisma-schema.ts",
     "migrate": "tsx scripts/migrate.ts",
     "seed:user": "tsx scripts/create-user.ts",
+    "seed:catalog": "tsx prisma/seed.ts",
     "backup": "bash scripts/backup-db.sh",
     "restore": "bash scripts/restore-db.sh"
   },
