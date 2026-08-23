@@ -28,12 +28,15 @@ class FakeCatalogPrisma implements CatalogSeedClient {
   readonly products = new Map<string, { id: bigint; productName: string; category: string; pointValue: number; nicknames: string[]; isActive: boolean; userId: bigint | null }>();
   readonly variants = new Map<string, { id: bigint; productId: bigint; variantLabel: string; displayShortcut: string | null; unitCount: number; pointValue: number; nicknames: string[]; isActive: boolean }>();
   transactions = 0;
+  productUpserts = 0;
+  variantUpserts = 0;
   private nextProductId = 1n;
   private nextVariantId = 1n;
 
   product = {
     findUnique: async ({ where }: { where: { productName: string } }) => this.products.get(where.productName) ?? null,
     upsert: async ({ where, create, update }: { where: { productName: string }; create: Omit<FakeCatalogPrisma['products'] extends Map<string, infer Value> ? Value : never, 'id'>; update: Partial<Omit<FakeCatalogPrisma['products'] extends Map<string, infer Value> ? Value : never, 'id'>> }) => {
+      this.productUpserts += 1;
       const existing = this.products.get(where.productName);
       const value = existing
         ? { ...existing, ...update }
@@ -41,13 +44,18 @@ class FakeCatalogPrisma implements CatalogSeedClient {
       this.products.set(where.productName, value);
       return value;
     },
-    count: async () => this.products.size,
+    count: async ({ where }: Parameters<CatalogSeedClient['product']['count']>[0]) => [...this.products.values()].filter((product) =>
+      where.productName.in.includes(product.productName)
+      && product.isActive === where.isActive
+      && product.userId === where.userId,
+    ).length,
   };
 
   productVariant = {
     findUnique: async ({ where }: { where: { productId_variantLabel: { productId: bigint; variantLabel: string } } }) =>
       this.variants.get(`${where.productId_variantLabel.productId}:${where.productId_variantLabel.variantLabel}`) ?? null,
     upsert: async ({ where, create, update }: { where: { productId_variantLabel: { productId: bigint; variantLabel: string } }; create: Omit<FakeCatalogPrisma['variants'] extends Map<string, infer Value> ? Value : never, 'id'>; update: Partial<Omit<FakeCatalogPrisma['variants'] extends Map<string, infer Value> ? Value : never, 'id'>> }) => {
+      this.variantUpserts += 1;
       const key = `${where.productId_variantLabel.productId}:${where.productId_variantLabel.variantLabel}`;
       const existing = this.variants.get(key);
       const value = existing
@@ -56,7 +64,16 @@ class FakeCatalogPrisma implements CatalogSeedClient {
       this.variants.set(key, value);
       return value;
     },
-    count: async () => this.variants.size,
+    count: async ({ where }: Parameters<CatalogSeedClient['productVariant']['count']>[0]) => [...this.variants.values()].filter((variant) =>
+      variant.isActive === where.isActive
+      && where.OR.some((candidate) => {
+        const product = [...this.products.values()].find((item) => item.id === variant.productId);
+        return candidate.productId === variant.productId
+          && candidate.variantLabel === variant.variantLabel
+          && product?.isActive === candidate.product.is.isActive
+          && product?.userId === candidate.product.is.userId;
+      }),
+    ).length,
   };
 
   async $transaction<T>(callback: (transaction: CatalogSeedTransaction) => Promise<T>): Promise<T> {
@@ -114,6 +131,7 @@ describe('catalog seed normalization', () => {
     expect(() => normalizeCatalog([row({ scope: 'private' })])).toThrow('scope must be global');
     expect(() => normalizeCatalog([row({ variant_id: null })])).toThrow('variant fields must be all present or all null');
     expect(() => normalizeCatalog([row({ aliases: ['tea', 4] as unknown as string[] })])).toThrow('aliases must contain only strings');
+    expect(() => normalizeCatalog([row({ product_name: 'Herbal\u0000Tea' })])).toThrow('must not contain U+0000');
   });
 });
 
@@ -126,18 +144,33 @@ describe('catalog seed execution', () => {
     ]);
     const prisma = new FakeCatalogPrisma();
     prisma.products.set('Unrelated product', { id: 90n, productName: 'Unrelated product', category: 'Other', pointValue: 1, nicknames: [], isActive: true, userId: null });
+    prisma.products.set('Inactive unrelated product', { id: 91n, productName: 'Inactive unrelated product', category: 'Other', pointValue: 1, nicknames: [], isActive: false, userId: null });
+    prisma.variants.set('90:unrelated', { id: 90n, productId: 90n, variantLabel: 'unrelated', displayShortcut: null, unitCount: 1, pointValue: 1, nicknames: [], isActive: true });
+    prisma.variants.set('91:inactive', { id: 91n, productId: 91n, variantLabel: 'inactive', displayShortcut: null, unitCount: 1, pointValue: 1, nicknames: [], isActive: false });
 
     const first = await seedCatalog(prisma, catalog);
+    const firstProductUpserts = prisma.productUpserts;
+    const firstVariantUpserts = prisma.variantUpserts;
     const second = await seedCatalog(prisma, catalog);
 
     expect(catalog.products.map((product) => [product.key, ...product.variants.map((variant) => variant.key)])).toEqual([
       ['Herbal Tea', 'Herbal Tea\u000010 bags', 'Herbal Tea\u000020 bags'],
       ['Vitamin C'],
     ]);
-    expect(first).toEqual({ products: { inserted: 2, updated: 0, skipped: 0, total: 3 }, variants: { inserted: 2, updated: 0, skipped: 0, total: 2 } });
-    expect(second).toEqual({ products: { inserted: 0, updated: 0, skipped: 2, total: 3 }, variants: { inserted: 0, updated: 0, skipped: 2, total: 2 } });
+    expect(first).toEqual({ products: { inserted: 2, updated: 0, skipped: 0, total: 2 }, variants: { inserted: 2, updated: 0, skipped: 0, total: 2 } });
+    expect(second).toEqual({ products: { inserted: 0, updated: 0, skipped: 2, total: 2 }, variants: { inserted: 0, updated: 0, skipped: 2, total: 2 } });
+    expect(prisma.productUpserts).toBe(firstProductUpserts);
+    expect(prisma.variantUpserts).toBe(firstVariantUpserts);
     expect(prisma.transactions).toBe(4);
     expect(prisma.products.has('Unrelated product')).toBe(true);
+  });
+
+  it('rejects a catalog key that collides with a user-owned product', async () => {
+    const prisma = new FakeCatalogPrisma();
+    prisma.products.set('Herbal Tea', { id: 55n, productName: 'Herbal Tea', category: 'ヘルスケア', pointValue: 120, nicknames: ['tea'], isActive: true, userId: 9n });
+
+    await expect(seedCatalog(prisma, normalizeCatalog([row()]))).rejects.toThrow('catalog product is not global');
+    expect(prisma.productUpserts).toBe(0);
   });
 
   it('formats only aggregate seed counts and totals', () => {

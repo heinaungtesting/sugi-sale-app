@@ -61,6 +61,25 @@ type ProductVariantData = {
 
 type StoredProductVariant = ProductVariantData & { id: bigint };
 
+type CatalogProductCountArgs = {
+  where: {
+    productName: { in: string[] };
+    isActive: true;
+    userId: null;
+  };
+};
+
+type CatalogVariantCountArgs = {
+  where: {
+    isActive: true;
+    OR: Array<{
+      productId: bigint;
+      variantLabel: string;
+      product: { is: { isActive: true; userId: null } };
+    }>;
+  };
+};
+
 export type CatalogSeedTransaction = {
   product: {
     findUnique(args: { where: { productName: string } }): Promise<StoredProduct | null>;
@@ -74,8 +93,8 @@ export type CatalogSeedTransaction = {
 
 export type CatalogSeedClient = CatalogSeedTransaction & {
   $transaction<T>(callback: (transaction: CatalogSeedTransaction) => Promise<T>): Promise<T>;
-  product: CatalogSeedTransaction['product'] & { count(): Promise<number> };
-  productVariant: CatalogSeedTransaction['productVariant'] & { count(): Promise<number> };
+  product: CatalogSeedTransaction['product'] & { count(args: CatalogProductCountArgs): Promise<number> };
+  productVariant: CatalogSeedTransaction['productVariant'] & { count(args: CatalogVariantCountArgs): Promise<number> };
 };
 
 export type CatalogSeedSummary = {
@@ -111,6 +130,7 @@ const normalizeText = (value: unknown, field: string, index: number) => {
   if (typeof value !== 'string') throw new Error(`catalog row ${index}: ${field} must be a string`);
   const normalized = value.normalize('NFKC').trim().replace(/\s+/gu, ' ');
   if (!normalized) throw new Error(`catalog row ${index}: ${field} must not be empty`);
+  if (normalized.includes('\u0000')) throw new Error(`catalog row ${index}: ${field} must not contain U+0000`);
   return normalized;
 };
 
@@ -265,6 +285,7 @@ const recordWrite = (counts: CatalogSeedCounts, existing: unknown, unchanged: bo
 export const seedCatalog = async (prisma: CatalogSeedClient, catalog: NormalizedCatalog): Promise<CatalogSeedSummary> => {
   const products = newCounts();
   const variants = newCounts();
+  const expectedVariantKeys: Array<{ productId: bigint; variantLabel: string }> = [];
 
   for (const family of catalog.products) {
     await prisma.$transaction(async (transaction) => {
@@ -280,14 +301,17 @@ export const seedCatalog = async (prisma: CatalogSeedClient, catalog: Normalized
       if (existingProduct && existingProduct.userId !== null) {
         throw new Error(`catalog product is not global: ${family.key}`);
       }
-      const product = await transaction.product.upsert({
-        where: { productName: family.key },
-        create: productData,
-        update: productData,
-      });
+      const product = !existingProduct || !sameProduct(existingProduct, productData)
+        ? await transaction.product.upsert({
+          where: { productName: family.key },
+          create: productData,
+          update: productData,
+        })
+        : existingProduct;
       recordWrite(products, existingProduct, !!existingProduct && sameProduct(existingProduct, productData));
 
       for (const variant of family.variants) {
+        expectedVariantKeys.push({ productId: product.id, variantLabel: variant.variantLabel });
         const variantData: ProductVariantData = {
           productId: product.id,
           variantLabel: variant.variantLabel,
@@ -299,14 +323,35 @@ export const seedCatalog = async (prisma: CatalogSeedClient, catalog: Normalized
         };
         const where = { productId_variantLabel: { productId: product.id, variantLabel: variant.variantLabel } };
         const existingVariant = await transaction.productVariant.findUnique({ where });
-        await transaction.productVariant.upsert({ where, create: variantData, update: variantData });
+        if (!existingVariant || !sameVariant(existingVariant, variantData)) {
+          await transaction.productVariant.upsert({ where, create: variantData, update: variantData });
+        }
         recordWrite(variants, existingVariant, !!existingVariant && sameVariant(existingVariant, variantData));
       }
     });
   }
 
-  products.total = await prisma.product.count();
-  variants.total = await prisma.productVariant.count();
+  const productWhere: CatalogProductCountArgs['where'] = {
+    productName: { in: catalog.products.map((product) => product.productName) },
+    isActive: true,
+    userId: null,
+  };
+  products.total = await prisma.product.count({ where: productWhere });
+  variants.total = await prisma.productVariant.count({
+    where: {
+      isActive: true,
+      OR: expectedVariantKeys.map((variant) => ({
+        productId: variant.productId,
+        variantLabel: variant.variantLabel,
+        product: {
+          is: {
+            isActive: true,
+            userId: null,
+          },
+        },
+      })),
+    },
+  });
   return { products, variants };
 };
 
