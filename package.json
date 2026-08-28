@@ -12,6 +12,7 @@
     "inspect:db-target": "tsx scripts/inspect-database-target.ts",
     "verify:prisma-schema": "tsx scripts/verify-prisma-schema.ts",
     "migrate": "tsx scripts/migrate.ts",
+    "create:admin": "tsx scripts/create-admin.ts",
     "seed:user": "tsx scripts/create-user.ts",
     "seed:catalog": "tsx prisma/seed.ts",
     "backup": "bash scripts/backup-db.sh",
