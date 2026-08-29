@@ -3,7 +3,7 @@
   "short_name": "SugiLog",
   "id": "/local",
   "scope": "/",
-  "start_url": "/local",
+  "start_url": "/",
   "display": "standalone",
   "lang": "ja",
   "orientation": "portrait-primary",

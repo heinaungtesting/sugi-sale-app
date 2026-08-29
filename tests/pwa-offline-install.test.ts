@@ -36,11 +36,11 @@ describe('installable offline PWA', () => {
     expect(worker).toContain('signal: controller.signal');
   });
 
-  it('declares a stable install identity and root scope in the manifest', () => {
+  it('keeps its install identity while launching into the main app', () => {
     const manifest = JSON.parse(source('public/manifest.json'));
     expect(manifest.id).toBe('/local');
     expect(manifest.scope).toBe('/');
-    expect(manifest.start_url).toBe('/local');
+    expect(manifest.start_url).toBe('/');
     expect(manifest.display).toBe('standalone');
   });
 

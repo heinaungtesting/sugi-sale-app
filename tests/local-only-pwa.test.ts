@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = process.cwd();
@@ -55,18 +56,43 @@ describe('local-only offline PWA contract', () => {
     expect(app).toContain('全{allFamilies.length}件中');
   });
 
-  it('launches installed PWA into local-only mode and precaches it', () => {
+  it('keeps local-only mode precached while the installed PWA launches the main app', async () => {
     const manifest = JSON.parse(source('public/manifest.json'));
     const worker = source('public/sw.js');
+    type InstallEvent = { waitUntil: (promise: Promise<unknown>) => void };
+    const handlers = new Map<string, (event: InstallEvent) => void>();
+    const precachedUrls: string[] = [];
+    let installPromise: Promise<unknown> | undefined;
+
+    runInNewContext(worker, {
+      self: {
+        addEventListener: (type: string, handler: (event: InstallEvent) => void) => handlers.set(type, handler),
+        skipWaiting: () => Promise.resolve(),
+      },
+      caches: {
+        open: () => Promise.resolve({
+          addAll: (urls: string[]) => {
+            precachedUrls.push(...urls);
+            return Promise.resolve();
+          },
+        }),
+      },
+    });
+    handlers.get('install')?.({
+      waitUntil: (promise) => {
+        installPromise = promise;
+      },
+    });
+    await installPromise;
+
     expect(manifest.id).toBe('/local');
-    expect(manifest.start_url).toBe('/local');
+    expect(manifest.start_url).toBe('/');
     expect(manifest.scope).toBe('/');
+    expect(precachedUrls).toContain('/local');
     expect(worker).toContain("const CACHE_VERSION = 'sugi-pwa-v23'");
     expect(worker).toContain("setTimeout(() => {");
     expect(worker).toContain("self.clients.matchAll({ type: 'window' })");
     expect(worker).toContain('client.navigate(client.url)');
-    expect(worker).toContain("const LOCAL_URL = '/local'");
-    expect(worker).toContain('LOCAL_URL');
     expect(worker).toContain("event.data?.type === 'CACHE_APP_SHELL'");
   });
 
