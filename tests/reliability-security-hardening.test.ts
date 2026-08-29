@@ -114,6 +114,8 @@ describe('mixed-origin mutation host policy', () => {
         headers: {
           host,
           origin,
+          'sec-fetch-site': 'same-origin',
+          'x-sugi-request': 'same-origin',
         },
       });
       expect(verifyCsrfRequest(request)).toBe(true);

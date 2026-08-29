@@ -20,10 +20,10 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const user = await currentUser();
-  if (!user) return requireUserResponse();
   const csrfError = requireCsrf(req);
   if (csrfError) return csrfError;
+  const user = await currentUser();
+  if (!user) return requireUserResponse();
 
   const body = await req.json().catch(() => ({}));
   const category = String(body.category ?? '') as FeedbackCategory;

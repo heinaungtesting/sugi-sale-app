@@ -18,6 +18,9 @@ describe('production readiness contract', () => {
     const healthPath = 'app/api/health/route.ts';
     expect(existsSync(join(process.cwd(), healthPath))).toBe(true);
     const health = source(healthPath);
+    expect(health).toContain("import('@/lib/prisma')");
+    expect(health).toContain('prisma.$queryRaw<HealthRow[]>');
+    expect(health).not.toContain("from '@/lib/db'");
     expect(health).toContain("SELECT 1 AS ok");
     expect(health).toContain('status: 503');
     expect(health).toContain('database');
@@ -28,6 +31,13 @@ describe('production readiness contract', () => {
     const generator = source('scripts/generate-build-info.mjs');
     expect(generator).toContain("git('rev-parse', 'HEAD')");
     expect(generator).toContain('builtAt');
+  });
+
+  it('starts the Docker application without applying migrations or seeds', () => {
+    const compose = source('docker-compose.yml');
+    expect(compose).toContain('command: sh -c "npm run start"');
+    expect(compose).not.toContain('npm run migrate');
+    expect(compose).not.toContain('npm run seed');
   });
 
   it('keeps login sessions in httpOnly cookies and rate-limits failed attempts', () => {
@@ -41,6 +51,14 @@ describe('production readiness contract', () => {
     expect(loginRoute).not.toContain('token:');
     expect(loginPage).not.toContain('document.cookie');
     expect(loginPage).not.toContain('data.token');
+  });
+
+  it('documents the deployed tokenless same-origin guard accurately', () => {
+    const production = source('PRODUCTION.md');
+    expect(production).toContain('tokenless same-origin');
+    expect(production).not.toContain('Signed double-submit CSRF protection is the primary mutation guard');
+    expect(production).toContain('SUGI_ALLOWED_HOSTS');
+    expect(production).toContain('SUGI_COOKIE_SECURE=true');
   });
 
   it('documents colleague rollout, backup, restore, and rollback', () => {

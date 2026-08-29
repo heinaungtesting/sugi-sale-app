@@ -61,7 +61,7 @@ describe('local-only offline PWA contract', () => {
     expect(manifest.id).toBe('/local');
     expect(manifest.start_url).toBe('/local');
     expect(manifest.scope).toBe('/');
-    expect(worker).toContain("const CACHE_VERSION = 'sugi-pwa-v22'");
+    expect(worker).toContain("const CACHE_VERSION = 'sugi-pwa-v23'");
     expect(worker).toContain("setTimeout(() => {");
     expect(worker).toContain("self.clients.matchAll({ type: 'window' })");
     expect(worker).toContain('client.navigate(client.url)');

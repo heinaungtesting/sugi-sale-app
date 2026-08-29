@@ -3,10 +3,10 @@ import { requireCsrf } from '@/lib/csrf';
 import { markNavigationPromptSeen } from '@/lib/sugi-navigation-notice';
 
 export async function POST(req: Request) {
-  const user = await currentUser();
-  if (!user) return requireUserResponse();
   const csrfError = requireCsrf(req);
   if (csrfError) return csrfError;
+  const user = await currentUser();
+  if (!user) return requireUserResponse();
   await markNavigationPromptSeen(user.id);
   return Response.json({ ok: true });
 }

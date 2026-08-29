@@ -8,6 +8,8 @@ RUN npm ci
 FROM node:22-alpine AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# Client generation reads Prisma config but does not connect to this placeholder.
+ENV DIRECT_URL=postgresql://build:build@127.0.0.1:1/build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build

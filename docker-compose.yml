@@ -7,7 +7,9 @@ services:
       - "${SUGI_APP_PORT:-3100}:3000"
     environment:
       NODE_ENV: production
-      SIGMA_RAG_PG_DSN: postgresql://sugi:sugi@db:5432/sugi_sale
+      DATABASE_URL: &database_url postgresql://sugi:sugi@db:5432/sugi_sale
+      DIRECT_URL: *database_url
+      SIGMA_RAG_PG_DSN: *database_url
       SUGI_SESSION_SECRET: ${SUGI_SESSION_SECRET:-local-dev-change-me-please-32chars}
       SUGI_COOKIE_SECURE: "false"
       SUGI_DEFAULT_USERNAME: ${SUGI_DEFAULT_USERNAME:-hein}
@@ -17,7 +19,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "npm run migrate && npm run start"
+    command: sh -c "npm run start"
     restart: unless-stopped
 
   db:

@@ -1,6 +1,6 @@
 # Sugi Sale App Production Runbook
 
-This app is intended for Sugi staff use on the private Tailscale network.
+This app supports a private Tailscale deployment and an explicitly configured HTTPS Vercel deployment.
 
 ## Production URLs
 
@@ -9,7 +9,7 @@ This app is intended for Sugi staff use on the private Tailscale network.
 - Private direct service: `http://100.111.161.73:3100`
 - Private alternate service: `http://100.111.161.73:8080`
 
-Signed double-submit CSRF protection is the primary mutation guard. Secondary host validation explicitly allows the MagicDNS hostname, local Tailscale IP, and localhost development hosts; additional hosts require `SUGI_ALLOWED_HOSTS`. Security headers and HTTPS on the canonical Tailscale origin are implemented. Do not expose the app to the public internet without edge rate limiting, centralized monitoring/alerting, a public-ingress review, and an incident-response process.
+The primary mutation guard is tokenless same-origin protection. Every unsafe API request must carry the non-simple `X-Sugi-Request` marker, must not report `Sec-Fetch-Site: cross-site`, and must have an `Origin` or `Referer` hostname that exactly matches the allowed target hostname. This includes login and service-worker queue replay. Local and Tailscale hosts are built in; additional exact hosts use `SUGI_ALLOWED_HOSTS`, while Vercel's exact system-provided deployment, branch, and production hostnames are recognized automatically. Do not expose the app publicly without edge rate limiting, centralized monitoring/alerting, a public-ingress review, and an incident-response process.
 
 ## Required environment
 
@@ -20,9 +20,13 @@ SUGI_SESSION_SECRET=<long random secret>
 SIGMA_RAG_PG_DSN=postgresql://sigma_rag@127.0.0.1:5433/sigma_rag
 NODE_ENV=production
 SUGI_COOKIE_SECURE=false
+SUGI_ALLOWED_HOSTS=herme-agents.tail71ac56.ts.net
+TRUSTED_PROXY=false
 ```
 
 `SUGI_COOKIE_SECURE=false` is acceptable only because this deployment is private HTTP over Tailscale. If you put the app behind HTTPS, remove it or set `SUGI_COOKIE_SECURE=true`.
+
+For Vercel, set `SUGI_COOKIE_SECURE=true` and `TRUSTED_PROXY=true`. In Project Settings → Environment Variables, enable **Automatically expose System Environment Variables** so `VERCEL_URL`, `VERCEL_BRANCH_URL`, and `VERCEL_PROJECT_PRODUCTION_URL` are available at runtime. If that setting is disabled, `SUGI_ALLOWED_HOSTS` must explicitly list every Preview and Production hostname or login and all writes will return `403`. Configure `SUGI_ALLOWED_HOSTS` only with exact custom domains that are not represented by those system variables; never use wildcard hostnames.
 
 Generate the session secret with:
 
@@ -152,7 +156,7 @@ If database contents are wrong, restore from backup after code rollback.
 - Login and sale-write throttling use atomic counters in the unlogged PostgreSQL table `sugi_rate_limits`, so limits survive app restarts and coordinate multiple app instances. Public exposure still requires an edge limiter.
 - No per-user audit export yet.
 - No public internet edge-hardening or centralized monitoring yet.
-- `npm audit --omit=dev` currently reports one moderate `postcss` advisory and two high `sharp`/libvips advisories through Next.js. The only proposed automated resolution is a breaking downgrade to Next.js 9, so do not run `npm audit fix --force`; upgrade when the Next.js dependency chain publishes a compatible fix.
+- `npm audit --omit=dev` currently reports the high-severity recursive-object stack-exhaustion advisory in `deepmerge-ts` through `@prisma/config` and the Prisma CLI. This checkout uses Prisma 7.9.1; those packages are marked `devOptional`, use only the repository-controlled `prisma.config.ts` during generation/migrations, and do not process request data in the deployed application. The checked Prisma 7.10.0 release still pins the affected `deepmerge-ts` 7.1.5, while npm's proposed forced fix downgrades Prisma to 6.12.0. Do not run `npm audit fix --force` or override Prisma's exact internal dependency; upgrade when Prisma publishes a compatible patched dependency and re-run the full build and migration verification.
 
 ## Anti-slow-internet: offline queue + idempotency
 
