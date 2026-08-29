@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'sugi-pwa-v22';
+const CACHE_VERSION = 'sugi-pwa-v23';
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const PAGE_CACHE = `${CACHE_VERSION}-pages`;
 const OFFLINE_URL = '/offline';
@@ -154,7 +154,10 @@ async function reconcileAcceptedQueue(db) {
 
   const response = await fetch('/api/sales/status', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Sugi-Request': 'same-origin',
+    },
     body: JSON.stringify({ idempotency_keys: active.map((entry) => entry.idempotencyKey) }),
     credentials: 'include',
     cache: 'no-store',
@@ -199,6 +202,7 @@ async function replaySaleQueue() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Sugi-Request': 'same-origin',
           'X-Queue-Attempt': String(entry.attempts),
         },
         body: JSON.stringify({

@@ -1,4 +1,5 @@
 import { loginUser, setSession } from '@/lib/auth';
+import { requireCsrf } from '@/lib/csrf';
 import { logEvent, requestId } from '@/infrastructure/logging/structured-logger';
 import { incrementMetric, observeMetric } from '@/infrastructure/observability/metrics';
 import {
@@ -20,6 +21,8 @@ function clientKey(req: Request, username: string) {
 }
 
 export async function POST(req: Request) {
+  const csrf = requireCsrf(req);
+  if (csrf) return csrf;
   const started = performance.now();
   const reqId = requestId(req);
   const body = await req.json().catch(() => ({}));

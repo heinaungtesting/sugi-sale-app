@@ -11,11 +11,11 @@ export async function GET() {
 }
 
 export async function PATCH(req: Request) {
+  const csrfError = requireCsrf(req);
+  if (csrfError) return csrfError;
   const user = await currentUser();
   if (!user) return requireUserResponse();
   if (!(await requireAdmin(user))) return Response.json({ error: 'forbidden' }, { status: 403 });
-  const csrfError = requireCsrf(req);
-  if (csrfError) return csrfError;
 
   const body = await req.json().catch(() => ({}));
   const id = Number(body.id);

@@ -53,6 +53,14 @@ describe('production readiness contract', () => {
     expect(loginPage).not.toContain('data.token');
   });
 
+  it('documents the deployed tokenless same-origin guard accurately', () => {
+    const production = source('PRODUCTION.md');
+    expect(production).toContain('tokenless same-origin');
+    expect(production).not.toContain('Signed double-submit CSRF protection is the primary mutation guard');
+    expect(production).toContain('SUGI_ALLOWED_HOSTS');
+    expect(production).toContain('SUGI_COOKIE_SECURE=true');
+  });
+
   it('documents colleague rollout, backup, restore, and rollback', () => {
     const doc = source('PRODUCTION.md');
     expect(doc).toContain('Create colleague accounts');
