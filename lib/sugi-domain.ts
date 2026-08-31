@@ -26,6 +26,7 @@ export type Product = {
 export type SearchableProduct = Product & {
   aliases?: string[];
   sale_count?: number;
+  search_score?: number;
   variant_id?: number | null;
   variant_label?: string | null;
   variant_display_shortcut?: string | null;
@@ -97,8 +98,38 @@ export function normalizeProductQuery(input: string): string {
   return input.normalize('NFKC').trim().replace(/\s+/g, '').toLowerCase();
 }
 
-function matchScore(product: SearchableProduct, normalizedQuery: string): number {
-  if (!normalizedQuery) return 1;
+export const MAX_PRODUCT_SEARCH_CODE_POINTS = 128;
+export const MAX_PRODUCT_SEARCH_TERM_CODE_POINTS = 32;
+export const MAX_PRODUCT_SEARCH_TERMS = 8;
+
+export type PreparedProductSearchQuery = {
+  query: string;
+  terms: string[];
+};
+
+export function prepareProductSearchQuery(input: string): PreparedProductSearchQuery | null {
+  const whitespaceNormalized = input.trim().replace(/\s+/gu, ' ');
+  if ([...whitespaceNormalized].length > MAX_PRODUCT_SEARCH_CODE_POINTS) return null;
+
+  const rawTerms = whitespaceNormalized ? whitespaceNormalized.split(' ') : [];
+  if (rawTerms.some((term) => [...term].length > MAX_PRODUCT_SEARCH_TERM_CODE_POINTS)) return null;
+
+  const terms = [...new Set(rawTerms)];
+  if (terms.length > MAX_PRODUCT_SEARCH_TERMS) return null;
+  return { query: terms.join(' '), terms };
+}
+
+function candidateMatchScore(candidates: string[], normalizedTerm: string): number {
+  if (candidates.some((value) => value === normalizedTerm)) return 1000;
+  if (candidates.some((value) => value.startsWith(normalizedTerm))) return 800;
+  if (candidates.some((value) => value.includes(normalizedTerm))) return 600;
+  if (candidates.some((value) => normalizedTerm.includes(value) && value.length >= 2)) return 500;
+  return 0;
+}
+
+function matchScore(product: SearchableProduct, query: string): number {
+  const normalizedTerms = query.trim().split(/\s+/u).map(normalizeProductQuery).filter(Boolean);
+  if (normalizedTerms.length === 0) return 1;
   const name = normalizeProductQuery(product.product_name);
   const aliases = (product.aliases ?? []).map(normalizeProductQuery);
   const variantCandidates = [
@@ -108,10 +139,12 @@ function matchScore(product: SearchableProduct, normalizedQuery: string): number
   ].filter((value): value is string => Boolean(value)).map(normalizeProductQuery);
   const candidates = [name, ...aliases, ...variantCandidates];
 
-  if (candidates.some((value) => value === normalizedQuery)) return 1000;
-  if (candidates.some((value) => value.startsWith(normalizedQuery))) return 800;
-  if (candidates.some((value) => value.includes(normalizedQuery))) return 600;
-  if (candidates.some((value) => normalizedQuery.includes(value) && value.length >= 2)) return 500;
+  const termScores = normalizedTerms.map((term) => candidateMatchScore(candidates, term));
+  if (termScores.every((score) => score > 0)) return Math.min(...termScores);
+  const databaseScore = Number(product.search_score ?? 0);
+  if (Number.isFinite(databaseScore) && databaseScore > 0) {
+    return Math.min(499, 100 + databaseScore);
+  }
   return 0;
 }
 
@@ -142,11 +175,12 @@ export function rankProductsForSearch(products: SearchableProduct[], query: stri
       ...winner,
       aliases: [...new Set([...(winner.aliases ?? []), ...(loser.aliases ?? [])])],
       variant_aliases: [...new Set([...(winner.variant_aliases ?? []), ...(loser.variant_aliases ?? [])])],
+      search_score: Math.max(winner.search_score ?? 0, loser.search_score ?? 0),
     });
   }
 
   const ranked = [...deduplicated.values()]
-    .map((product) => ({ product, score: matchScore(product, normalizedQuery) }))
+    .map((product) => ({ product, score: matchScore(product, query) }))
     .filter((entry) => !normalizedQuery || entry.score > 0)
     .sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;

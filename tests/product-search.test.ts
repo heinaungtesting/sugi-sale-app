@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeProductQuery, rankProductsForSearch, type SearchableProduct } from '../lib/sugi-domain';
+import { normalizeProductQuery, prepareProductSearchQuery, rankProductsForSearch, type SearchableProduct } from '../lib/sugi-domain';
 
 const products: SearchableProduct[] = [
   { id: 1, product_name: '口内炎パッチ', point_value: 80, category: '医薬品', scope: 'global', aliases: ['kuchi', 'kuchinaien', 'こうない'], sale_count: 8 },
@@ -84,5 +84,82 @@ describe('product search ranking', () => {
     ], '日本蜂寿 粒');
 
     expect(result.map((product) => product.variant_id)).toEqual([401]);
+  });
+
+  it('keeps a Japanese typo match returned by the database search engine', () => {
+    const result = rankProductsForSearch([
+      {
+        id: 500,
+        product_name: 'フェイタスゲル',
+        point_value: 120,
+        category: '外用薬',
+        scope: 'global',
+        search_score: 2.5,
+      },
+    ], 'フェタスゲル');
+
+    expect(result.map((product) => product.product_name)).toEqual(['フェイタスゲル']);
+  });
+
+  it('keeps exact Japanese matches ahead of fuzzy database matches', () => {
+    const result = rankProductsForSearch([
+      {
+        id: 501,
+        product_name: '日本蜂寿',
+        point_value: 100,
+        category: 'ヘルスケア',
+        scope: 'global',
+        search_score: 1,
+      },
+      {
+        id: 502,
+        product_name: '日本蜂蜜',
+        point_value: 500,
+        category: 'ヘルスケア',
+        scope: 'global',
+        search_score: 100,
+      },
+    ], '日本蜂寿');
+
+    expect(result.map((product) => product.product_name)).toEqual(['日本蜂寿', '日本蜂蜜']);
+  });
+
+  it('keeps an exact family and variant match ahead of a popular fuzzy match', () => {
+    const result = rankProductsForSearch([
+      {
+        id: 503,
+        product_name: 'フェイタスゲル',
+        point_value: 120,
+        category: '外用薬',
+        scope: 'global',
+        variant_id: 1,
+        variant_label: '50g',
+        sale_count: 0,
+        search_score: 1,
+      },
+      {
+        id: 504,
+        product_name: 'フェイタスゲル',
+        point_value: 120,
+        category: '外用薬',
+        scope: 'global',
+        variant_id: 2,
+        variant_label: '55g',
+        sale_count: 100,
+        search_score: 100,
+      },
+    ], 'フェイタスゲル 50g');
+
+    expect(result.map((product) => product.variant_label)).toEqual(['50g', '55g']);
+  });
+
+  it('deduplicates and bounds database search terms by Unicode code point', () => {
+    expect(prepareProductSearchQuery('  日本蜂寿   粒 日本蜂寿 ')).toEqual({
+      query: '日本蜂寿 粒',
+      terms: ['日本蜂寿', '粒'],
+    });
+    expect(prepareProductSearchQuery(Array.from({ length: 9 }, (_, index) => `語${index}`).join(' '))).toBeNull();
+    expect(prepareProductSearchQuery('あ'.repeat(33))).toBeNull();
+    expect(prepareProductSearchQuery('あ'.repeat(129))).toBeNull();
   });
 });

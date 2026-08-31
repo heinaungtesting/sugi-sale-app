@@ -4,6 +4,8 @@ import { requireCsrf } from '@/lib/csrf';
 import { logActivity } from '@/lib/sugi-activity';
 import { logEvent, requestId } from '@/infrastructure/logging/structured-logger';
 import { incrementMetric, observeMetric } from '@/infrastructure/observability/metrics';
+import { reserveRateLimit } from '@/infrastructure/rate-limit/postgres-rate-limit';
+import { prepareProductSearchQuery } from '@/lib/sugi-domain';
 
 export async function GET(req: Request) {
   const started = performance.now();
@@ -16,8 +18,12 @@ export async function GET(req: Request) {
   }
   const search = url.searchParams.get('q');
   if (search !== null) {
+    const preparedSearch = prepareProductSearchQuery(search);
+    if (!preparedSearch) return Response.json({ error: 'invalid search query' }, { status: 400 });
     try {
-      const products = await listSearchableProducts(user.id, search);
+      const allowed = await reserveRateLimit('product-search', String(user.id), 60_000, 120);
+      if (!allowed) return Response.json({ error: 'too many searches' }, { status: 429 });
+      const products = await listSearchableProducts(user.id, preparedSearch.query);
       const durationMs = performance.now() - started;
       incrementMetric('search.success');
       observeMetric('search.duration_ms', durationMs);

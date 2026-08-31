@@ -34,11 +34,11 @@ describe('requireDatabaseUrl', () => {
     })).toContain('127.0.0.1:5432');
   });
 
-  it('configures each runtime pool for one connection in the sugi schema', () => {
+  it('configures each runtime pool for one connection in the application schema', () => {
     expect(runtimeDatabasePoolOptions('postgresql://runtime.example/db')).toEqual({
       connectionString: 'postgresql://runtime.example/db',
       max: 1,
-      options: '-c search_path=sugi,public',
+      options: '-c search_path=pg_catalog,sugi',
     });
   });
 

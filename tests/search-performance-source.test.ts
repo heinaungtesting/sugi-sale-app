@@ -7,19 +7,31 @@ const source = (path: string) => readFileSync(join(process.cwd(), path), 'utf8')
 describe('search performance source contract', () => {
   it('filters product search in SQL before JS ranking', () => {
     const db = source('lib/sugi-db.ts');
-    expect(db).toContain('normalizeSearchParam(search)');
-    expect(db).toContain('$2 = \'\' OR');
-    expect(db).toContain("regexp_replace(lower(normalize(p.product_name, NFKC))");
-    expect(db).toContain("regexp_replace(lower(normalize(COALESCE(pv.variant_label, ''), NFKC))");
-    expect(db).toContain("normalize(p.product_name || ' ' || COALESCE(pv.variant_label, ''), NFKC)");
-    expect(db).toContain('unnest(COALESCE(p.nicknames');
-    expect(db).toContain('unnest(COALESCE(pv.nicknames');
+    const searchBoundary = source('prisma/migrations/20260831_isolate_pgroonga_search_privileges/migration.sql');
+    expect(db).toContain('prepareProductSearchQuery(search)');
+    expect(db).toContain('product_matches AS');
+    expect(db).toContain('variant_matches AS');
+    expect(db).toContain('sugi.search_product_candidates');
+    expect(searchBoundary).toContain('product_trigram_matches AS');
+    expect(searchBoundary).toContain('variant_trigram_matches AS');
+    expect(searchBoundary).toContain('public.similarity');
+    expect(searchBoundary).toContain('search_score >= 0.4');
+    expect(db).toContain('SELECT DISTINCT term');
+    expect(searchBoundary).toContain('pgroonga_query_escape');
+    expect(searchBoundary).toContain('pgroonga_condition');
+    expect(searchBoundary).toContain('fuzzy_max_distance_ratio');
+    expect(searchBoundary).toContain('char_length(requested_term) >= 4');
+    expect(searchBoundary).toContain('0.34::REAL');
+    expect(searchBoundary).toContain('&@~');
+    expect(searchBoundary).toContain('pgroonga_score');
+    expect(db).not.toContain('normalize(p.product_name, NFKC)');
+    expect(db).not.toContain("LIKE '%' || $2 || '%'");
     expect(db).toContain('LIMIT $3');
   });
 
   it('pre-aggregates sale counts instead of multiplying rows through sales_logs joins', () => {
     const db = source('lib/sugi-db.ts');
-    expect(db).toContain('WITH sale_counts AS');
+    expect(db).toContain('sale_counts AS (');
     expect(db).toContain('GROUP BY product_id');
     expect(db).not.toContain('COALESCE(COUNT(s.id), 0)::text AS sale_count');
   });

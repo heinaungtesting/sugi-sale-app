@@ -1,6 +1,6 @@
 import { pool, query, queryOne } from './db';
 import { applyDueMonthlyPointCampaigns, getPreviousTokyoMonthKey } from './sugi-admin-db';
-import { applyDefaultProductAliases, categoryLabel, isLoggableProduct, normalizeProductCategory, rankProductsForSearch, type Category, type Product, type SearchableProduct, type TodaySale } from './sugi-domain';
+import { applyDefaultProductAliases, categoryLabel, isLoggableProduct, normalizeProductCategory, prepareProductSearchQuery, rankProductsForSearch, type Category, type Product, type SearchableProduct, type TodaySale } from './sugi-domain';
 import { buildQuickProductPlan } from './product-creation';
 import { syncProductPointValue, syncVariantPointValue, syncVariantPointValueBySaleName } from './sugi-point-sync';
 
@@ -119,6 +119,7 @@ function rowToProduct(r: {
   variant_point_value?: number | null;
   variant_nicknames?: string[] | null;
   previous_point_value?: number | null;
+  search_score?: number | string | null;
 }): SearchableProduct {
   return {
     id: Number(r.id),
@@ -133,6 +134,7 @@ function rowToProduct(r: {
     variant_point_value: r.variant_point_value === null || r.variant_point_value === undefined ? null : Number(r.variant_point_value),
     variant_aliases: r.variant_nicknames ?? [],
     previous_point_value: r.previous_point_value === null || r.previous_point_value === undefined ? null : Number(r.previous_point_value),
+    search_score: Number(r.search_score ?? 0),
   };
 }
 
@@ -150,23 +152,61 @@ type SearchableProductRow = {
   variant_point_value: number | null;
   variant_nicknames: string[] | null;
   previous_point_value: number | null;
+  search_score: number | string | null;
 };
-
-function normalizeSearchParam(search: string): string {
-  return search.normalize('NFKC').trim().replace(/\s+/g, '').toLowerCase();
-}
 
 function hydrateSearchRows(rows: SearchableProductRow[]): SearchableProduct[] {
   return applyDefaultProductAliases(rows.map((r) => rowToProduct(r))).map((product, index) => ({ ...product, sale_count: Number(rows[index]?.sale_count ?? 0) }));
 }
 
+const PRODUCT_SEARCH_TIMEOUT_MS = 2_000;
+const PRODUCT_SEARCH_CANDIDATE_LIMIT = 1_000;
+
+async function querySearchProducts(text: string, params: unknown[]): Promise<SearchableProductRow[]> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN READ ONLY');
+    await client.query("SELECT set_config('statement_timeout', $1, true)", [String(PRODUCT_SEARCH_TIMEOUT_MS)]);
+    const result = await client.query<SearchableProductRow>(text, params);
+    await client.query('COMMIT');
+    return result.rows;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function listSearchableProducts(userId: number, search = '', limit = 60): Promise<SearchableProduct[]> {
  await applyDueMonthlyPointCampaigns();
- const normalizedSearch = normalizeSearchParam(search);
+ const preparedSearch = prepareProductSearchQuery(search);
+ if (!preparedSearch) throw new RangeError('invalid product search query');
  const previousMonth = getPreviousTokyoMonthKey();
-  const safeLimit = Math.max(1, Math.min(Number(limit) || 60, normalizedSearch ? 200 : 1000));
-  const rows = await query<SearchableProductRow>(
-    `WITH sale_counts AS (
+  const hasSearch = preparedSearch.terms.length > 0;
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 60, hasSearch ? 200 : 1000));
+  const rows = await querySearchProducts(
+    `WITH search_terms AS MATERIALIZED (
+       SELECT DISTINCT term,
+              CASE WHEN char_length(term) >= 4 THEN 0.34::real ELSE 0::real END AS fuzzy_ratio
+       FROM unnest($2::text[]) AS term
+       WHERE term <> ''
+     ),
+     search_candidates AS MATERIALIZED (
+       SELECT *
+       FROM sugi.search_product_candidates($1, $2::text[])
+     ),
+     product_matches AS MATERIALIZED (
+       SELECT product_id, term, search_score
+       FROM search_candidates
+       WHERE product_id IS NOT NULL
+     ),
+     variant_matches AS MATERIALIZED (
+       SELECT variant_id, term, search_score
+       FROM search_candidates
+       WHERE variant_id IS NOT NULL
+     ),
+     sale_counts AS (
        SELECT product_id, COUNT(*)::int AS sale_count
        FROM sales_logs
        WHERE user_id = $1
@@ -180,10 +220,34 @@ export async function listSearchableProducts(userId: number, search = '', limit 
             pv.point_value AS variant_point_value,
             pv.nicknames AS variant_nicknames,
             previous_campaign.point_value AS previous_point_value,
-            COALESCE(sc.sale_count, 0)::text AS sale_count
+            COALESCE(sc.sale_count, 0)::text AS sale_count,
+            CASE
+              WHEN cardinality($2::text[]) = 0 THEN 0
+              ELSE GREATEST(COALESCE(search_match.search_score, 0), 1)
+            END AS search_score
      FROM products p
      LEFT JOIN product_variants pv ON pv.product_id = p.id AND pv.is_active = TRUE
      LEFT JOIN sale_counts sc ON sc.product_id = p.id
+     LEFT JOIN LATERAL (
+       SELECT COUNT(*)::int AS matched_terms,
+              SUM(term_match.search_score)::double precision AS search_score
+       FROM (
+         SELECT search_terms.term,
+                GREATEST(
+                  COALESCE(product_matches.search_score, 0),
+                  COALESCE(variant_matches.search_score, 0)
+                ) AS search_score
+         FROM search_terms
+         LEFT JOIN product_matches
+           ON product_matches.product_id = p.id
+          AND product_matches.term = search_terms.term
+         LEFT JOIN variant_matches
+           ON variant_matches.variant_id = pv.id
+          AND variant_matches.term = search_terms.term
+         WHERE product_matches.product_id IS NOT NULL
+            OR variant_matches.variant_id IS NOT NULL
+       ) AS term_match
+     ) AS search_match ON TRUE
      LEFT JOIN sugi_point_campaign_items previous_campaign
        ON previous_campaign.campaign_month = $4
       AND previous_campaign.product_id = p.id
@@ -194,20 +258,15 @@ export async function listSearchableProducts(userId: number, search = '', limit 
      WHERE p.is_active = TRUE
        AND (p.user_id IS NULL OR p.user_id = $1)
        AND (
-         $2 = '' OR
-         regexp_replace(lower(normalize(p.product_name, NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
-         regexp_replace(lower(normalize(p.product_name || ' ' || COALESCE(pv.variant_label, ''), NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
-         EXISTS (SELECT 1 FROM unnest(COALESCE(p.nicknames, ARRAY[]::text[])) AS nick WHERE regexp_replace(lower(normalize(nick, NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%') OR
-         regexp_replace(lower(normalize(COALESCE(pv.variant_label, ''), NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
-         regexp_replace(lower(normalize(COALESCE(pv.display_shortcut, ''), NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%' OR
-         EXISTS (SELECT 1 FROM unnest(COALESCE(pv.nicknames, ARRAY[]::text[])) AS vnick WHERE regexp_replace(lower(normalize(vnick, NFKC)), '\\s+', '', 'g') LIKE '%' || $2 || '%')
+         cardinality($2::text[]) = 0 OR
+         search_match.matched_terms = (SELECT COUNT(*) FROM search_terms)
        )
-     ORDER BY COALESCE(sc.sale_count, 0) DESC, p.product_name, pv.unit_count NULLS LAST, pv.id
+     ORDER BY search_score DESC, COALESCE(sc.sale_count, 0) DESC, p.product_name, pv.unit_count NULLS LAST, pv.id
      LIMIT $3`,
-    [userId, normalizedSearch, normalizedSearch ? Math.max(safeLimit * 5, 100) : 1000, previousMonth]
+    [userId, preparedSearch.terms, PRODUCT_SEARCH_CANDIDATE_LIMIT, previousMonth]
   );
   const products = hydrateSearchRows(rows);
-  return rankProductsForSearch(products, search, safeLimit);
+  return rankProductsForSearch(products, preparedSearch.query, safeLimit);
 }
 
 export async function getVisibleProduct(userId: number, productId: number): Promise<Product | null> {
