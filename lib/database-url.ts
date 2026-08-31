@@ -50,6 +50,6 @@ export function runtimeDatabasePoolOptions(connectionString: string): RuntimeDat
   return {
     connectionString,
     max: RUNTIME_DATABASE_POOL_MAX,
-    options: '-c search_path=sugi,public',
+    options: '-c search_path=pg_catalog,sugi',
   };
 }

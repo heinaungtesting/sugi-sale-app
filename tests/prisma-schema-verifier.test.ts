@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   expectedSchemaObjects,
   expectedSchemaSemantics,
+  isSupportedPgroongaVersion,
   normalizePrimaryUniqueKeyColumns,
   requireVerifierDirectUrl,
+  summarizePgroongaRuntime,
   summarizeSchemaSemantics,
   summarizeSchemaVerification,
 } from '@/scripts/verify-prisma-schema';
@@ -61,8 +63,10 @@ describe('Prisma schema verifier', () => {
       'uq_puf_variant',
       'uq_puf_product',
       'idx_puf_published',
+      'idx_products_search_pgroonga',
+      'idx_product_variants_search_pgroonga',
     ]);
-    expect(expectedSchemaObjects.extensions).toEqual(['pg_trgm']);
+    expect(expectedSchemaObjects.extensions).toEqual(['pg_trgm', 'pgroonga']);
   });
 
   it('reports every missing object without exposing connection details', () => {
@@ -76,7 +80,7 @@ describe('Prisma schema verifier', () => {
       ok: false,
       missingTables: expectedSchemaObjects.tables,
       missingIndexes: expectedSchemaObjects.indexes,
-      missingExtensions: ['pg_trgm'],
+      missingExtensions: ['pg_trgm', 'pgroonga'],
     });
   });
 
@@ -85,7 +89,7 @@ describe('Prisma schema verifier', () => {
       summarizeSchemaVerification({
         tables: [...expectedSchemaObjects.tables, 'sales_logs'],
         indexes: [...expectedSchemaObjects.indexes, 'idx_puf_published'],
-        extensions: ['pg_trgm', 'pg_trgm'],
+        extensions: ['pg_trgm', 'pg_trgm', 'pgroonga', 'pgroonga'],
       }),
     ).toEqual({
       ok: true,
@@ -123,6 +127,8 @@ describe('Prisma schema verifier', () => {
         expect.objectContaining({ name: 'uniq_sales_logs_daily_product' }),
         expect.objectContaining({ name: 'idx_enrichment_jobs_claim' }),
         expect.objectContaining({ name: 'idx_puf_published' }),
+        expect.objectContaining({ name: 'idx_products_search_pgroonga' }),
+        expect.objectContaining({ name: 'idx_product_variants_search_pgroonga' }),
       ]),
     );
     expect(expectedSchemaSemantics.columns).toEqual(
@@ -155,6 +161,46 @@ describe('Prisma schema verifier', () => {
     ]);
   });
 
+  it('requires PGroonga behind a security-definer function without runtime schema usage', () => {
+    expect(isSupportedPgroongaVersion('3.2.5')).toBe(true);
+    expect(isSupportedPgroongaVersion('3.2.0')).toBe(false);
+    expect(summarizePgroongaRuntime({
+      version: '3.2.5',
+      schemaName: 'extensions',
+      runtimeHasSchemaUsage: false,
+      extensionSchemaUntrustedCreate: false,
+      pgTrgmSchemaName: 'public',
+      runtimeCanExecuteDangerousPgroongaFunctions: true,
+      searchFunctionIsSecurityDefiner: true,
+      searchFunctionHasSafePath: true,
+      runtimeCanExecuteSearchFunction: true,
+    })).toEqual({ ok: true, issues: [] });
+    expect(summarizePgroongaRuntime({
+      version: '3.2.0',
+      schemaName: 'public',
+      runtimeHasSchemaUsage: true,
+      extensionSchemaUntrustedCreate: true,
+      pgTrgmSchemaName: 'extensions',
+      runtimeCanExecuteDangerousPgroongaFunctions: true,
+      searchFunctionIsSecurityDefiner: false,
+      searchFunctionHasSafePath: false,
+      runtimeCanExecuteSearchFunction: false,
+    })).toEqual({
+      ok: false,
+      issues: [
+        'unsupported_version',
+        'wrong_schema',
+        'runtime_extension_schema_usage',
+        'extension_schema_untrusted_create',
+        'pg_trgm_wrong_schema',
+        'dangerous_pgroonga_function_execute',
+        'search_function_not_security_definer',
+        'search_function_unsafe_path',
+        'runtime_search_function_execute_missing',
+      ],
+    });
+  });
+
   it('identifies semantic mismatches by object identifier', () => {
     const summary = summarizeSchemaSemantics({
       checkConstraints: [
@@ -176,6 +222,12 @@ describe('Prisma schema verifier', () => {
         {
           name: 'uniq_sales_logs_daily_product',
           definition: 'CREATE INDEX uniq_sales_logs_daily_product ON sales_logs (id)',
+          isValid: true,
+        },
+        {
+          name: 'idx_products_search_pgroonga',
+          definition: 'CREATE INDEX idx_products_search_pgroonga ON products USING pgroonga (product_name)',
+          isValid: false,
         },
       ],
       primaryUniqueKeys: [
@@ -202,6 +254,7 @@ describe('Prisma schema verifier', () => {
     expect(summary.mismatchedGeneratedColumns).toContain('sales_logs.total_points');
     expect(summary.mismatchedTablePersistence).toEqual(['sugi_rate_limits']);
     expect(summary.mismatchedIndexDefinitions).toContain('uniq_sales_logs_daily_product');
+    expect(summary.mismatchedIndexDefinitions).toContain('idx_products_search_pgroonga');
     expect(summary.mismatchedPrimaryUniqueKeys).toContain('product_variants_product_id_variant_label_key');
     expect(summary.mismatchedColumns).toContain('sales_logs.sold_date');
     expect(summary.ok).toBe(false);

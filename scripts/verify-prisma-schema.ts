@@ -55,8 +55,10 @@ export const expectedSchemaObjects = {
     'uq_puf_variant',
     'uq_puf_product',
     'idx_puf_published',
+    'idx_products_search_pgroonga',
+    'idx_product_variants_search_pgroonga',
   ],
-  extensions: ['pg_trgm'],
+  extensions: ['pg_trgm', 'pgroonga'],
 } as const;
 
 export const expectedSchemaSemantics = {
@@ -129,6 +131,8 @@ export const expectedSchemaSemantics = {
     { name: 'uq_puf_variant', definitionIncludes: ['create unique index', 'where', 'variant_id', 'is not null'] },
     { name: 'uq_puf_product', definitionIncludes: ['create unique index', 'where', 'variant_id', 'is null'] },
     { name: 'idx_puf_published', definitionIncludes: ['where', 'is_published', 'true'] },
+    { name: 'idx_products_search_pgroonga', definitionIncludes: ['using pgroonga', 'product_name', 'nicknames'] },
+    { name: 'idx_product_variants_search_pgroonga', definitionIncludes: ['using pgroonga', 'variant_label', 'display_shortcut', 'nicknames'] },
   ],
   primaryUniqueKeys: [
     { name: 'sugi_users_pkey', constraintType: 'p', keyColumns: ['id'] },
@@ -179,7 +183,7 @@ export type ConstraintRow = { name: string; definition: string };
 export type ForeignKeyRow = { name: string; targetTable?: string; deleteAction: string };
 export type GeneratedColumnRow = { tableName: string; columnName: string; generation: string; expression: string };
 export type TablePersistenceRow = { tableName: string; persistence: string };
-export type IndexDefinitionRow = { name: string; definition: string };
+export type IndexDefinitionRow = { name: string; definition: string; isValid?: boolean };
 export type PrimaryUniqueKeyRow = { name: string; constraintType: string; keyColumns: readonly string[] };
 export type ColumnRow = { tableName: string; columnName: string; dataType: string; udtName: string; isNullable: string; columnDefault: string | null };
 
@@ -223,6 +227,66 @@ export type SchemaVerificationSummary = {
   missingIndexes: string[];
   missingExtensions: string[];
 };
+
+export const MINIMUM_PGROONGA_VERSION = '3.2.1';
+
+export type PgroongaRuntimeMetadata = {
+  version: string | null;
+  schemaName: string | null;
+  runtimeHasSchemaUsage: boolean;
+  extensionSchemaUntrustedCreate: boolean;
+  pgTrgmSchemaName: string | null;
+  runtimeCanExecuteDangerousPgroongaFunctions: boolean;
+  searchFunctionIsSecurityDefiner: boolean;
+  searchFunctionHasSafePath: boolean;
+  runtimeCanExecuteSearchFunction: boolean;
+};
+
+export type PgroongaRuntimeSummary = {
+  ok: boolean;
+  issues: Array<
+    | 'unsupported_version'
+    | 'wrong_schema'
+    | 'runtime_extension_schema_usage'
+    | 'extension_schema_untrusted_create'
+    | 'pg_trgm_wrong_schema'
+    | 'dangerous_pgroonga_function_execute'
+    | 'search_function_not_security_definer'
+    | 'search_function_unsafe_path'
+    | 'runtime_search_function_execute_missing'
+  >;
+};
+
+function numericVersionParts(version: string): number[] {
+  return version.split('.').map((part) => Number.parseInt(part, 10) || 0);
+}
+
+export function isSupportedPgroongaVersion(version: string | null): boolean {
+  if (!version) return false;
+  const actual = numericVersionParts(version);
+  const minimum = numericVersionParts(MINIMUM_PGROONGA_VERSION);
+  for (let index = 0; index < Math.max(actual.length, minimum.length); index += 1) {
+    const difference = (actual[index] ?? 0) - (minimum[index] ?? 0);
+    if (difference !== 0) return difference > 0;
+  }
+  return true;
+}
+
+export function summarizePgroongaRuntime(metadata: PgroongaRuntimeMetadata): PgroongaRuntimeSummary {
+  const issues: PgroongaRuntimeSummary['issues'] = [];
+  if (!isSupportedPgroongaVersion(metadata.version)) issues.push('unsupported_version');
+  if (metadata.schemaName !== 'extensions') issues.push('wrong_schema');
+  if (metadata.runtimeHasSchemaUsage) issues.push('runtime_extension_schema_usage');
+  if (metadata.extensionSchemaUntrustedCreate) issues.push('extension_schema_untrusted_create');
+  if (metadata.pgTrgmSchemaName !== 'public') issues.push('pg_trgm_wrong_schema');
+  if (metadata.runtimeHasSchemaUsage && metadata.runtimeCanExecuteDangerousPgroongaFunctions) {
+    issues.push('dangerous_pgroonga_function_execute');
+  }
+  if (!metadata.searchFunctionIsSecurityDefiner) issues.push('search_function_not_security_definer');
+  if (!metadata.searchFunctionHasSafePath) issues.push('search_function_unsafe_path');
+  if (!metadata.runtimeCanExecuteSearchFunction) issues.push('runtime_search_function_execute_missing');
+  return { ok: issues.length === 0, issues };
+}
 
 function missingObjects(expected: readonly string[], actual: readonly string[]) {
   const actualSet = new Set(actual);
@@ -344,6 +408,7 @@ export function summarizeSchemaSemantics(
     expectedSchemaSemantics.indexDefinitions,
     byName(schemaSemantics.indexDefinitions),
     (expected, actual) =>
+      actual.isValid !== false &&
       expected.definitionIncludes.every((term) => normalized(actual.definition).includes(normalized(term))),
   );
   const primaryUniqueKeys = splitSemanticRows(
@@ -423,10 +488,78 @@ async function verifySchema(): Promise<void> {
       WHERE schemaname = 'sugi'
       ORDER BY indexname
     `);
-    const extensions = await pool.query<{ extname: string }>(`
-      SELECT extname
-      FROM pg_extension
+    const extensions = await pool.query<{ extname: string; extversion: string; schema_name: string }>(`
+      SELECT extension_row.extname,
+             extension_row.extversion,
+             extension_schema.nspname AS schema_name
+      FROM pg_extension AS extension_row
+      JOIN pg_namespace AS extension_schema ON extension_schema.oid = extension_row.extnamespace
       ORDER BY extname
+    `);
+    const runtimeSearchPrivileges = await pool.query<{
+      has_extensions_usage: boolean;
+      untrusted_extensions_create: boolean;
+      can_execute_dangerous_pgroonga_functions: boolean;
+      search_function_is_security_definer: boolean;
+      search_function_has_safe_path: boolean;
+      can_execute_search_function: boolean;
+    }>(`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_roles AS runtime_role
+        JOIN pg_namespace AS extension_schema ON extension_schema.nspname = 'extensions'
+        WHERE runtime_role.rolname = 'sugi_app'
+          AND has_schema_privilege(runtime_role.oid, extension_schema.oid, 'USAGE')
+      ) AS has_extensions_usage,
+      EXISTS (
+        SELECT 1
+        FROM pg_roles AS role_row
+        CROSS JOIN pg_namespace AS extension_schema
+        WHERE extension_schema.nspname = 'extensions'
+          AND role_row.oid <> extension_schema.nspowner
+          AND NOT role_row.rolsuper
+          AND NOT (
+            role_row.rolname = 'dashboard_user'
+            AND role_row.rolcreaterole
+          )
+          AND has_schema_privilege(role_row.oid, extension_schema.oid, 'CREATE')
+      ) AS untrusted_extensions_create,
+      EXISTS (
+        SELECT 1
+        FROM pg_roles AS runtime_role
+        JOIN pg_proc AS dangerous_function
+          ON has_function_privilege(runtime_role.oid, dangerous_function.oid, 'EXECUTE')
+        JOIN pg_namespace AS function_schema ON function_schema.oid = dangerous_function.pronamespace
+        WHERE runtime_role.rolname = 'sugi_app'
+          AND function_schema.nspname = 'extensions'
+          AND dangerous_function.proname IN (
+            'pgroonga_command',
+            'pgroonga_set_writable',
+            'pgroonga_vacuum',
+            'pgroonga_wal_apply',
+            'pgroonga_wal_truncate',
+            'pgroonga_wal_set_applied_position'
+          )
+      ) AS can_execute_dangerous_pgroonga_functions,
+      COALESCE((
+        SELECT search_function.prosecdef
+        FROM pg_proc AS search_function
+        WHERE search_function.oid = to_regprocedure('sugi.search_product_candidates(bigint,text[])')
+      ), FALSE) AS search_function_is_security_definer,
+      EXISTS (
+        SELECT 1
+        FROM pg_proc AS search_function
+        WHERE search_function.oid = to_regprocedure('sugi.search_product_candidates(bigint,text[])')
+          AND search_function.proconfig @> ARRAY['search_path=pg_catalog, extensions']::TEXT[]
+      ) AS search_function_has_safe_path,
+      EXISTS (
+        SELECT 1
+        FROM pg_roles AS runtime_role
+        JOIN pg_proc AS search_function
+          ON search_function.oid = to_regprocedure('sugi.search_product_candidates(bigint,text[])')
+        WHERE runtime_role.rolname = 'sugi_app'
+          AND has_function_privilege(runtime_role.oid, search_function.oid, 'EXECUTE')
+      ) AS can_execute_search_function
     `);
     const constraints = await pool.query<{
       name: string;
@@ -491,11 +624,19 @@ async function verifySchema(): Promise<void> {
     const indexDefinitions = await pool.query<{
       name: string;
       definition: string;
+      is_valid: boolean;
     }>(`
-      SELECT indexname AS name, indexdef AS definition
-      FROM pg_indexes
-      WHERE schemaname = 'sugi'
-      ORDER BY indexname
+      SELECT index_catalog.indexname AS name,
+             index_catalog.indexdef AS definition,
+             index_row.indisvalid AS is_valid
+      FROM pg_indexes AS index_catalog
+      JOIN pg_namespace AS table_schema ON table_schema.nspname = index_catalog.schemaname
+      JOIN pg_class AS index_table
+        ON index_table.relnamespace = table_schema.oid
+       AND index_table.relname = index_catalog.indexname
+      JOIN pg_index AS index_row ON index_row.indexrelid = index_table.oid
+      WHERE index_catalog.schemaname = 'sugi'
+      ORDER BY index_catalog.indexname
     `);
     const primaryUniqueKeys = await pool.query<{
       name: string;
@@ -539,6 +680,22 @@ async function verifySchema(): Promise<void> {
       extensions: extensions.rows.map((row) => row.extname),
     };
     const summary = summarizeSchemaVerification(schemaObjects);
+    const pgroongaExtension = extensions.rows.find((extension) => extension.extname === 'pgroonga');
+    const pgTrgmExtension = extensions.rows.find((extension) => extension.extname === 'pg_trgm');
+    const runtimeSearchPrivilege = runtimeSearchPrivileges.rows[0];
+    const pgroongaRuntimeSummary = summarizePgroongaRuntime({
+      version: pgroongaExtension?.extversion ?? null,
+      schemaName: pgroongaExtension?.schema_name ?? null,
+      runtimeHasSchemaUsage: runtimeSearchPrivilege?.has_extensions_usage === true,
+      extensionSchemaUntrustedCreate: runtimeSearchPrivilege?.untrusted_extensions_create === true,
+      pgTrgmSchemaName: pgTrgmExtension?.schema_name ?? null,
+      runtimeCanExecuteDangerousPgroongaFunctions:
+        runtimeSearchPrivilege?.can_execute_dangerous_pgroonga_functions === true,
+      searchFunctionIsSecurityDefiner:
+        runtimeSearchPrivilege?.search_function_is_security_definer === true,
+      searchFunctionHasSafePath: runtimeSearchPrivilege?.search_function_has_safe_path === true,
+      runtimeCanExecuteSearchFunction: runtimeSearchPrivilege?.can_execute_search_function === true,
+    });
     const semanticSummary = summarizeSchemaSemantics({
       checkConstraints: constraints.rows
         .filter((constraint) => constraint.constraint_type === 'c')
@@ -560,7 +717,11 @@ async function verifySchema(): Promise<void> {
         tableName: table.table_name,
         persistence: table.persistence,
       })),
-      indexDefinitions: indexDefinitions.rows,
+      indexDefinitions: indexDefinitions.rows.map((index) => ({
+        name: index.name,
+        definition: index.definition,
+        isValid: index.is_valid,
+      })),
       primaryUniqueKeys: primaryUniqueKeys.rows.map((key) => ({
         name: key.name,
         constraintType: key.constraint_type,
@@ -578,7 +739,7 @@ async function verifySchema(): Promise<void> {
 
     console.log(
       JSON.stringify({
-        ok: summary.ok && semanticSummary.ok,
+        ok: summary.ok && semanticSummary.ok && pgroongaRuntimeSummary.ok,
         tableCount: schemaObjects.tables.length,
         indexCount: schemaObjects.indexes.length,
         extensionCount: schemaObjects.extensions.length,
@@ -590,6 +751,10 @@ async function verifySchema(): Promise<void> {
         missingTables: summary.missingTables,
         missingIndexes: summary.missingIndexes,
         missingExtensions: summary.missingExtensions,
+        pgroongaVersion: pgroongaExtension?.extversion ?? null,
+        pgroongaSchema: pgroongaExtension?.schema_name ?? null,
+        pgTrgmSchema: pgTrgmExtension?.schema_name ?? null,
+        pgroongaRuntimeIssues: pgroongaRuntimeSummary.issues,
         missingCheckConstraints: semanticSummary.missingCheckConstraints,
         mismatchedCheckConstraints: semanticSummary.mismatchedCheckConstraints,
         missingForeignKeys: semanticSummary.missingForeignKeys,
@@ -607,7 +772,7 @@ async function verifySchema(): Promise<void> {
       }),
     );
 
-    if (!summary.ok || !semanticSummary.ok) {
+    if (!summary.ok || !semanticSummary.ok || !pgroongaRuntimeSummary.ok) {
       process.exitCode = 1;
     }
   } finally {
@@ -620,8 +785,20 @@ const invokedAsScript =
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
 
 if (invokedAsScript) {
-  verifySchema().catch(() => {
-    console.error('Prisma schema verification failed without printing connection details.');
-    process.exitCode = 1;
-  });
+  import('dotenv')
+    .then(({ config }) => {
+      config({ quiet: true });
+      return verifySchema();
+    })
+    .catch((error: unknown) => {
+      const errorName = error instanceof Error ? error.name : 'UnknownError';
+      const errorCode = typeof error === 'object' && error !== null && 'code' in error
+        ? String(error.code)
+        : 'unknown';
+      const safeMessage = error instanceof Error
+        ? error.message.replace(/postgres(?:ql)?:\/\/\S+/gi, '[redacted-database-url]')
+        : 'unknown error';
+      console.error(`Prisma schema verification failed without printing connection details (${errorName}/${errorCode}): ${safeMessage}`);
+      process.exitCode = 1;
+    });
 }
