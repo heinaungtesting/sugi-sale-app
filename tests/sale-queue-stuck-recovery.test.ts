@@ -18,13 +18,14 @@ describe('sale queue stuck-pending recovery', () => {
   let listeners: Record<string, Array<() => void>>;
   let fetchMock: ReturnType<typeof vi.fn>;
   let cookieJar: string;
+  let localStorage: ReturnType<typeof makeStorage>;
 
   beforeEach(() => {
     vi.useFakeTimers();
     vi.resetModules();
     listeners = {};
     cookieJar = 'sugi_csrf=initial-csrf-token';
-    const localStorage = makeStorage();
+    localStorage = makeStorage();
     vi.stubGlobal('window', {
       localStorage,
       addEventListener: vi.fn((event: string, cb: () => void) => {
@@ -52,6 +53,218 @@ describe('sale queue stuck-pending recovery', () => {
     queue.__resetForTests();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('classifies transient stored failures for automatic recovery', async () => {
+    const queue = await import('../lib/sale-queue');
+
+    for (const error of [
+      undefined,
+      'network',
+      'timeout',
+      'offline',
+      'invalid csrf token',
+      'http_408',
+      'http_429',
+      'http_500',
+      'failed to log sale',
+    ]) {
+      expect(queue.isRetryableStoredQueueError(error), error ?? 'missing error').toBe(true);
+    }
+
+    for (const error of [
+      'invalid product_id',
+      'product not found',
+      'queued sale owner mismatch',
+    ]) {
+      expect(queue.isRetryableStoredQueueError(error), error).toBe(false);
+    }
+  });
+
+  it('restores a persisted transient failure to pending without changing its key', async () => {
+    localStorage.setItem('sugi-sale-queue-v1', JSON.stringify([{
+      idempotencyKey: 'persisted-transient-key',
+      ownerUserId: 1,
+      productId: 91,
+      productName: 'persisted item',
+      pointValue: 7,
+      pointsSnapshot: 7,
+      quantity: 1,
+      enqueuedAt: 1_700_000_000_000,
+      occurredAt: '2023-11-14T22:13:20.000Z',
+      createdAt: '2023-11-14T22:13:20.000Z',
+      attempts: 8,
+      lastError: 'network',
+      status: 'failed',
+    }]));
+
+    const queue = await import('../lib/sale-queue');
+    queue.initSaleQueue(1);
+
+    expect(queue.getSnapshot().entries[0]).toMatchObject({
+      idempotencyKey: 'persisted-transient-key',
+      status: 'pending',
+    });
+  });
+
+  it('keeps a persisted permanent request failure failed', async () => {
+    localStorage.setItem('sugi-sale-queue-v1', JSON.stringify([{
+      idempotencyKey: 'persisted-permanent-key',
+      ownerUserId: 1,
+      productId: 0,
+      productName: 'invalid item',
+      pointValue: 7,
+      pointsSnapshot: 7,
+      quantity: 1,
+      enqueuedAt: 1_700_000_000_000,
+      occurredAt: '2023-11-14T22:13:20.000Z',
+      createdAt: '2023-11-14T22:13:20.000Z',
+      attempts: 1,
+      lastError: 'invalid product_id',
+      retryable: false,
+      status: 'failed',
+    }]));
+
+    const queue = await import('../lib/sale-queue');
+    queue.initSaleQueue(1);
+
+    expect(queue.getSnapshot()).toMatchObject({ pendingCount: 0, failedCount: 1 });
+    expect(queue.getSnapshot().entries[0]?.status).toBe('failed');
+  });
+
+  it('keeps an exhausted HTTP 500 failure pending for a later automatic retry', async () => {
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/health')) return { ok: true } as Response;
+      if (url.includes('/api/sales/status')) {
+        return { ok: true, json: async () => ({ accepted: [] }) } as Response;
+      }
+      if (url.includes('/api/sales')) {
+        return new Response(JSON.stringify({ error: 'failed to log sale' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return { ok: true } as Response;
+    });
+
+    const queue = await import('../lib/sale-queue');
+    queue.initSaleQueue(1);
+    const entry = queue.enqueueSale({
+      ownerUserId: 1,
+      productId: 92,
+      productName: 'outage item',
+      pointValue: 9,
+      quantity: 1,
+    });
+    entry.attempts = 3;
+
+    await vi.advanceTimersByTimeAsync(14_600);
+
+    expect(queue.getSnapshot()).toMatchObject({ pendingCount: 1, failedCount: 0 });
+    expect(queue.getSnapshot().entries[0]).toMatchObject({
+      idempotencyKey: 'stuck-test-key-12345678',
+      status: 'pending',
+    });
+  });
+
+  it('marks a permanently invalid HTTP 400 request failed without retrying it', async () => {
+    let saleAttempts = 0;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/health')) return { ok: true } as Response;
+      if (url.includes('/api/sales/status')) {
+        return { ok: true, json: async () => ({ accepted: [] }) } as Response;
+      }
+      if (url.includes('/api/sales')) {
+        saleAttempts += 1;
+        return new Response(JSON.stringify({ error: 'invalid product_id' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return { ok: true } as Response;
+    });
+
+    const queue = await import('../lib/sale-queue');
+    queue.initSaleQueue(1);
+    queue.enqueueSale({
+      ownerUserId: 1,
+      productId: 94,
+      productName: 'invalid item',
+      pointValue: 12,
+      quantity: 1,
+    });
+
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(saleAttempts).toBe(1);
+    expect(queue.getSnapshot()).toMatchObject({ pendingCount: 0, failedCount: 1 });
+    expect(queue.getSnapshot().entries[0]).toMatchObject({
+      status: 'failed',
+      lastError: 'invalid product_id',
+      retryable: false,
+    });
+  });
+
+  it('automatically syncs with the same idempotency key after a long outage recovers', async () => {
+    let serverRecovered = false;
+    const sentKeys: string[] = [];
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/health')) return { ok: true } as Response;
+      if (url.includes('/api/sales/status')) {
+        return { ok: true, json: async () => ({ accepted: [] }) } as Response;
+      }
+      if (url.includes('/api/sales')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { idempotency_key?: string };
+        if (body.idempotency_key) sentKeys.push(body.idempotency_key);
+        if (!serverRecovered) {
+          return new Response(JSON.stringify({ error: 'failed to log sale' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            id: 9001,
+            product_name: 'eventual item',
+            quantity: 1,
+            points_per_item: 11,
+            total_points: 11,
+            today_total: 11,
+            today_items: 1,
+            idempotent_replay: false,
+          }),
+        } as Response;
+      }
+      return { ok: true } as Response;
+    });
+
+    const queue = await import('../lib/sale-queue');
+    queue.initSaleQueue(1);
+    queue.enqueueSale({
+      ownerUserId: 1,
+      productId: 93,
+      productName: 'eventual item',
+      pointValue: 11,
+      quantity: 1,
+    });
+
+    await vi.advanceTimersByTimeAsync(65_000);
+    expect(sentKeys.length).toBeGreaterThan(4);
+    expect(queue.getSnapshot().failedCount).toBe(0);
+
+    serverRecovered = true;
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(queue.getSnapshot().entries[0]).toMatchObject({
+      idempotencyKey: 'stuck-test-key-12345678',
+      status: 'synced',
+      sale: { id: 9001 },
+    });
+    expect(new Set(sentKeys)).toEqual(new Set(['stuck-test-key-12345678']));
   });
 
   it('retries pending entries via the periodic safety-net, not just on user taps', async () => {

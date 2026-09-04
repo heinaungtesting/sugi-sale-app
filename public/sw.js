@@ -124,14 +124,53 @@ async function writeSaleQueueEntry(db, entry) {
   await transactionDone(transaction);
 }
 
+const PERMANENT_SALE_QUEUE_ERRORS = new Set([
+  'invalid idempotency_key',
+  'invalid product_id',
+  'invalid variant_id',
+  'quantity must be an integer between 1 and 99',
+  'invalid sold_date',
+  'queued sale owner mismatch',
+  'product not found',
+]);
+
+function isRetryableStoredSaleError(error) {
+  const normalized = String(error || '').trim().toLowerCase();
+  if (!normalized) return true;
+  const httpStatus = /^http_(\d{3})$/.exec(normalized);
+  if (httpStatus) {
+    const status = Number(httpStatus[1]);
+    return status === 408 || status === 429 || status >= 500;
+  }
+  return !PERMANENT_SALE_QUEUE_ERRORS.has(normalized);
+}
+
+function isClaimableSaleQueueEntry(entry, now) {
+  if (entry.status === 'pending') return true;
+  if (entry.status === 'sending') return Number(entry.leaseExpiresAt || 0) <= now;
+  return entry.status === 'failed'
+    && (entry.retryable === true
+      || (entry.retryable === undefined && isRetryableStoredSaleError(entry.lastError)));
+}
+
+function applySaleQueueHttpFailure(entry, status, error) {
+  const retryable = status === 401
+    || status === 403
+    || status === 408
+    || status === 429
+    || status >= 500;
+  entry.lastError = error || `http_${status}`;
+  entry.retryable = retryable;
+  entry.status = retryable ? 'pending' : 'failed';
+}
+
 async function claimNextSaleQueueEntry(db) {
   const now = Date.now();
   const transaction = db.transaction(SALE_QUEUE_STORE, 'readwrite');
   const store = transaction.objectStore(SALE_QUEUE_STORE);
   const entries = await idbRequest(store.getAll());
   const entry = entries
-    .filter((entry) => entry.status === 'pending'
-      || (entry.status === 'sending' && entry.leaseExpiresAt <= now))
+    .filter((entry) => isClaimableSaleQueueEntry(entry, now))
     .sort((a, b) => a.enqueuedAt - b.enqueuedAt)[0];
   if (!entry) {
     await transactionDone(transaction);
@@ -176,6 +215,7 @@ async function reconcileAcceptedQueue(db) {
     entry.status = 'synced';
     entry.sale = accepted.sale;
     delete entry.lastError;
+    delete entry.retryable;
     delete entry.leaseOwner;
     delete entry.leaseExpiresAt;
     await writeSaleQueueEntry(db, entry);
@@ -221,6 +261,7 @@ async function replaySaleQueue() {
         entry.sale = await response.json();
         entry.status = 'synced';
         delete entry.lastError;
+        delete entry.retryable;
         delete entry.leaseOwner;
         delete entry.leaseExpiresAt;
         await writeSaleQueueEntry(db, entry);
@@ -229,9 +270,7 @@ async function replaySaleQueue() {
 
       let body = null;
       try { body = await response.json(); } catch { /* non-JSON error */ }
-      entry.lastError = body?.error || `http_${response.status}`;
-      const transient = response.status === 408 || response.status === 429 || response.status >= 500;
-      entry.status = response.status === 409 ? 'failed' : transient || response.status === 401 || response.status === 403 ? 'pending' : 'failed';
+      applySaleQueueHttpFailure(entry, response.status, body?.error);
       delete entry.leaseOwner;
       delete entry.leaseExpiresAt;
       await writeSaleQueueEntry(db, entry);
@@ -240,6 +279,7 @@ async function replaySaleQueue() {
       if (entry.status === 'sending') {
         entry.status = 'pending';
         entry.lastError = error instanceof Error ? error.message : 'network';
+        entry.retryable = true;
       }
       delete entry.leaseOwner;
       delete entry.leaseExpiresAt;

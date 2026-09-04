@@ -9,9 +9,8 @@
 //  - Every queued entry carries a stable idempotency key. The server deduplicates by
 //    (user_id, idempotency_key), so a retry that succeeds after a previous request
 //    actually persisted never double-counts the sale.
-//  - Failures retry with exponential backoff, then mark the entry as `failed` so the
-//    user can tap to retry manually. Permanent HTTP errors (4xx other than 408/429)
-//    skip retries.
+//  - Transient failures retry with backoff and remain pending for later recovery.
+//    Permanent request errors become `failed` so the user can correct them manually.
 //  - Online/offline state is tracked via navigator.onLine + 'online'/'offline' events
 //    plus a periodic /api/health probe. Multi-tab sync uses BroadcastChannel.
 //
@@ -41,6 +40,28 @@ const STALE_DRAIN_INTERVAL_MS = 5 * 1000;
 
 export type QueueStatus = 'pending' | 'sending' | 'synced' | 'failed';
 
+const PERMANENT_QUEUE_ERRORS = new Set([
+  'invalid idempotency_key',
+  'invalid product_id',
+  'invalid variant_id',
+  'quantity must be an integer between 1 and 99',
+  'invalid sold_date',
+  'queued sale owner mismatch',
+  'product not found',
+]);
+
+/** Classify legacy failed records that do not yet carry an explicit retry flag. */
+export function isRetryableStoredQueueError(error?: string): boolean {
+  const normalized = String(error ?? '').trim().toLowerCase();
+  if (!normalized) return true;
+  const httpStatus = /^http_(\d{3})$/.exec(normalized);
+  if (httpStatus) {
+    const status = Number(httpStatus[1]);
+    return status === 408 || status === 429 || status >= 500;
+  }
+  return !PERMANENT_QUEUE_ERRORS.has(normalized);
+}
+
 export type QueueEntry = {
   /** Stable UUID for the queued tap. Server uses (user_id, idempotency_key) to dedupe. */
   idempotencyKey: string;
@@ -59,6 +80,8 @@ export type QueueEntry = {
   createdAt: string;
   attempts: number;
   lastError?: string;
+  /** Persisted failure classification so hydration can safely resume transient work. */
+  retryable?: boolean;
   status: QueueStatus;
   leaseOwner?: string;
   leaseExpiresAt?: number;
@@ -107,6 +130,7 @@ export function applyAcceptedSales(queueEntries: QueueEntry[], accepted: Accepte
     entry.status = 'synced';
     entry.sale = sale;
     entry.lastError = undefined;
+    delete entry.retryable;
     delete entry.leaseOwner;
     delete entry.leaseExpiresAt;
   }
@@ -176,8 +200,13 @@ function normalizeRecords(parsed: unknown): QueueEntry[] {
         status: e.status,
       };
       const leaseExpired = Number(restored.leaseExpiresAt ?? 0) <= Date.now();
-      return restored.status === 'sending' && leaseExpired
-        ? { ...restored, status: 'pending' as const, attempts: Math.max(0, restored.attempts - 1) }
+      if (restored.status === 'sending' && leaseExpired) {
+        return { ...restored, status: 'pending' as const, attempts: Math.max(0, restored.attempts - 1) };
+      }
+      const retryableFailure = restored.retryable === true
+        || (restored.retryable === undefined && isRetryableStoredQueueError(restored.lastError));
+      return restored.status === 'failed' && retryableFailure
+        ? { ...restored, status: 'pending' as const, retryable: true }
         : restored;
     });
 }
@@ -356,14 +385,20 @@ async function postOnce(entry: QueueEntry): Promise<PostResult> {
       const sale = (await res.json()) as TodaySale & { today_total: number; today_items: number; idempotent_replay: boolean };
       return { ok: true, sale };
     }
-    // 4xx other than 408 (request timeout) and 429 (rate limit) are permanent.
-    const permanent = res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429;
     let body: { error?: string } | null = null;
     try {
       body = (await res.json()) as { error?: string };
     } catch {
       body = null;
     }
+    // Authentication/CSRF failures can recover after token refresh or login. Other
+    // 4xx responses describe an invalid queued command and require user correction.
+    const retryable = res.status === 401
+      || res.status === 403
+      || res.status === 408
+      || res.status === 429
+      || res.status >= 500;
+    const permanent = res.status >= 400 && res.status < 500 && !retryable;
     return { ok: false, error: body?.error ?? `http_${res.status}`, permanent };
   } catch (err) {
     const name = (err as { name?: string } | null)?.name;
@@ -395,6 +430,7 @@ async function sendEntry(entry: QueueEntry): Promise<void> {
   persist();
 
   let lastError = 'unknown';
+  let permanentFailure = false;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
     if (attempt > 0) {
       const delay = BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)];
@@ -409,6 +445,7 @@ async function sendEntry(entry: QueueEntry): Promise<void> {
       entry.sale = result.sale;
       entry.status = 'synced';
       entry.lastError = undefined;
+      delete entry.retryable;
       delete entry.leaseOwner;
       delete entry.leaseExpiresAt;
       persist();
@@ -416,15 +453,16 @@ async function sendEntry(entry: QueueEntry): Promise<void> {
       return;
     }
     lastError = result.error;
-    if (result.permanent) break;
+    if (result.permanent) {
+      permanentFailure = true;
+      break;
+    }
   }
   entry.lastError = lastError;
-  // Network/server errors after MAX_ATTEMPTS → failed (user can retry manually).
-  // Permanent 4xx (e.g., one bad CSRF cookie) → stays pending; the periodic
-  // stale-recovery drain below re-attempts within seconds without a fresh tap.
-  entry.status = entry.attempts >= MAX_ATTEMPTS && lastError !== 'invalid csrf token' && lastError !== 'http_404'
-    ? 'failed'
-    : 'pending';
+  // Exhausting one retry pass must not make infrastructure failures terminal.
+  // The periodic recovery drain will start another pass after connectivity returns.
+  entry.retryable = !permanentFailure;
+  entry.status = permanentFailure ? 'failed' : 'pending';
   delete entry.leaseOwner;
   delete entry.leaseExpiresAt;
   persist();
@@ -692,6 +730,7 @@ export function retryEntry(idempotencyKey: string): boolean {
   if (entry.status !== 'failed') return false;
   entry.status = 'pending';
   entry.lastError = undefined;
+  delete entry.retryable;
   persist();
   emit();
   scheduleDrain(0);

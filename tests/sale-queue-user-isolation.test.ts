@@ -24,7 +24,6 @@ describe('sale queue user isolation', () => {
   it('keeps the service-worker replay bound to the original owner', () => {
     const worker = source('public/sw.js');
     expect(worker).toContain('owner_user_id: entry.ownerUserId');
-    expect(worker).toContain("entry.status = response.status === 409 ? 'failed'");
   });
 
   it('passes the authenticated user id through every queue entry point', () => {

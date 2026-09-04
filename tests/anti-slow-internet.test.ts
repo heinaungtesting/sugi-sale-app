@@ -98,14 +98,6 @@ describe('anti-slow-internet contract', () => {
       expect(q).toContain('AbortController');
     });
 
-    it('treats most 4xx responses as permanent (no retry) and only retries network/timeout/5xx', () => {
-      const q = source('lib/sale-queue.ts');
-      expect(q).toContain('permanent');
-      expect(q).toMatch(/res\.status\s*>=\s*400\s*&&\s*res\.status\s*<\s*500/);
-      expect(q).toContain('res.status !== 408');
-      expect(q).toContain('res.status !== 429');
-    });
-
     it('caps concurrent in-flight requests to keep the server responsive', () => {
       const q = source('lib/sale-queue.ts');
       expect(q).toContain('const concurrency = 1');

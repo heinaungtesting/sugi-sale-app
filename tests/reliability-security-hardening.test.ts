@@ -50,7 +50,6 @@ describe('offline queue durability', () => {
     expect(queue).toContain('await claimQueueRecord(');
     expect(queue).toContain("restored.status === 'sending' && leaseExpired");
     expect(worker).toContain('async function claimNextSaleQueueEntry');
-    expect(worker).toContain('entry.leaseExpiresAt <= now');
   });
 
   it('never lets a stale page snapshot downgrade a Service Worker synced record', () => {
