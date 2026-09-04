@@ -95,6 +95,7 @@ const copy = {
 // stuck touch events firing twice — NOT a network wait. The actual write goes
 // through the offline queue and never blocks the UI.
 const TAP_DEBOUNCE_MS = 250;
+const SEARCH_DEBOUNCE_MS = 200;
 const LONG_PRESS_MS = 550;
 
 function busyKeyFor(variant: ProductVariant) {
@@ -153,17 +154,22 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
 
     const controller = new AbortController();
     setIsSearching(true);
-    fetch(`/api/products?q=${encodeURIComponent(normalizedQuery)}`, { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error('search failed'))))
-      .then((data: SearchableProduct[]) => setSearchProducts(data))
-      .catch((error) => {
-        if (error.name !== 'AbortError') setSearchProducts(products);
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setIsSearching(false);
-      });
+    const timer = window.setTimeout(() => {
+      fetch(`/api/products?q=${encodeURIComponent(normalizedQuery)}`, { signal: controller.signal })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error('search failed'))))
+        .then((data: SearchableProduct[]) => setSearchProducts(data))
+        .catch((error) => {
+          if (error.name !== 'AbortError') setSearchProducts(products);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setIsSearching(false);
+        });
+    }, SEARCH_DEBOUNCE_MS);
 
-    return () => controller.abort();
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [hasQuery, normalizedQuery, products]);
 
   useEffect(() => {

@@ -28,7 +28,8 @@ describe('logout session revocation regression', () => {
     expect(auth).toContain('createSessionRecord');
     expect(auth).toContain('revokeSession');
     expect(auth).toContain('claims.jti');
-    expect(auth).toContain('JOIN sugi_sessions');
+    expect(auth).toContain('FROM sugi_sessions');
+    expect(auth).toContain('JOIN valid_session');
     expect(auth).toContain('revoked_at IS NULL');
   });
 

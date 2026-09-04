@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ConnectivityIndicator } from './ConnectivityIndicator';
 
@@ -85,7 +86,7 @@ export function AppHeader({ user, totalPoints, totalItems, backHref, language, o
         <div className="header-row hero-top-row">
           <div>
             {backHref ? (
-              <a className="back" href={backHref}>{t.categories}</a>
+              <Link className="back" href={backHref}>{t.categories}</Link>
             ) : (
               <div className="hero-kicker">
                 {pawIcon}{t.loggedBy} <span className="user-name-highlight">{user.displayName}</span>
@@ -109,12 +110,12 @@ export function AppHeader({ user, totalPoints, totalItems, backHref, language, o
         )}
       </header>
       <nav className="nav bottom-nav" aria-label="Main navigation">
-        <a href="/" aria-current={activePage === 'home' ? 'page' : undefined}><span className="nav-pet dog" aria-hidden="true" />{t.home}</a>
-        <a href="/sales" aria-current={activePage === 'sales' ? 'page' : undefined}><span className="nav-pet cat gray" aria-hidden="true" />{t.calendar}</a>
-        <a href="/logs" aria-current={activePage === 'logs' ? 'page' : undefined}><span className="nav-pet dog gold" aria-hidden="true" />{t.logs}</a>
-        <a href="/feedback" aria-current={activePage === 'feedback' ? 'page' : undefined}><span className="nav-pet cat orange" aria-hidden="true" />{t.feedback}</a>
-        <a href="/sessions" aria-current={activePage === 'sessions' ? 'page' : undefined}><span className="nav-pet cat gray" aria-hidden="true" />{t.sessions}</a>
-        {user.role === 'admin' && <a href="/admin" aria-current={activePage === 'admin' ? 'page' : undefined}><span className="nav-pet cat orange" aria-hidden="true" />{t.admin}</a>}
+        <Link href="/" aria-current={activePage === 'home' ? 'page' : undefined}><span className="nav-pet dog" aria-hidden="true" />{t.home}</Link>
+        <Link href="/sales" aria-current={activePage === 'sales' ? 'page' : undefined}><span className="nav-pet cat gray" aria-hidden="true" />{t.calendar}</Link>
+        <Link href="/logs" aria-current={activePage === 'logs' ? 'page' : undefined}><span className="nav-pet dog gold" aria-hidden="true" />{t.logs}</Link>
+        <Link href="/feedback" aria-current={activePage === 'feedback' ? 'page' : undefined}><span className="nav-pet cat orange" aria-hidden="true" />{t.feedback}</Link>
+        <Link href="/sessions" aria-current={activePage === 'sessions' ? 'page' : undefined}><span className="nav-pet cat gray" aria-hidden="true" />{t.sessions}</Link>
+        {user.role === 'admin' && <Link href="/admin" aria-current={activePage === 'admin' ? 'page' : undefined}><span className="nav-pet cat orange" aria-hidden="true" />{t.admin}</Link>}
       </nav>
     </>
   );

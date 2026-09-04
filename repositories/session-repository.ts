@@ -59,15 +59,6 @@ export async function createSessionRecord(input: {
   }
 }
 
-export async function touchSession(jti: string): Promise<void> {
-  await query(
-    `UPDATE sugi_sessions SET last_used_at = now()
-     WHERE jti = $1 AND revoked_at IS NULL AND expires_at > now()
-       AND last_used_at < now() - interval '5 minutes'`,
-    [jti],
-  );
-}
-
 export async function revokeSession(jti: string): Promise<void> {
   await query('UPDATE sugi_sessions SET revoked_at = now() WHERE jti = $1', [jti]);
 }

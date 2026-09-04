@@ -12,7 +12,7 @@ export default async function HomePage() {
   const user = await currentUser();
   if (!user) redirect('/login');
   const [products, today, showFeedbackPrompt, showNavigationPrompt] = await Promise.all([
-    listSearchableProducts(user.id, '', 300),
+    listSearchableProducts(user.id, '', 60),
     todaySummary(user.id),
     shouldShowFeedbackPrompt(user.id),
     shouldShowNavigationPrompt(user.id),

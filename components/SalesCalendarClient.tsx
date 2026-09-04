@@ -24,6 +24,7 @@ type Props = {
 };
 
 const TAP_DEBOUNCE_MS = 250;
+const SEARCH_DEBOUNCE_MS = 200;
 const ADD_FAMILY_PAGE_SIZE = 12;
 
 function monthLabel(month: string) {
@@ -56,17 +57,19 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
   const [logs, setLogs] = useState(day.logs);
   const [summary, setSummary] = useState({ total_points: day.total_points, total_items: day.total_items });
   const [addQuery, setAddQuery] = useState('');
+  const [searchProducts, setSearchProducts] = useState<SearchableProduct[]>(products);
+  const [isSearching, setIsSearching] = useState(false);
   const [visibleFamilyLimit, setVisibleFamilyLimit] = useState(ADD_FAMILY_PAGE_SIZE);
   const [recentlyTapped, setRecentlyTapped] = useState<string | null>(null);
   const [queueSnapshot, setQueueSnapshot] = useState<QueueSnapshot>(() => getSnapshot());
   const totalByDate = useMemo(() => new Map(totals.map((t) => [t.sold_date, t])), [totals]);
   const cells = useMemo(() => buildCalendarCells(month), [month]);
+  const normalizedQuery = addQuery.trim();
   const allAddFamilies = useMemo(() => {
-    const query = addQuery.trim();
-    if (!query) return [];
-    const ranked = rankProductsForSearch(products, query, products.length);
-    return groupProductsIntoFamilies(ranked, products.length);
-  }, [addQuery, products]);
+    if (!normalizedQuery) return [];
+    const ranked = rankProductsForSearch(searchProducts, normalizedQuery, searchProducts.length);
+    return groupProductsIntoFamilies(ranked, searchProducts.length);
+  }, [normalizedQuery, searchProducts]);
   const addFamilies = allAddFamilies.slice(0, visibleFamilyLimit);
   const hiddenFamilyCount = Math.max(0, allAddFamilies.length - addFamilies.length);
 
@@ -86,6 +89,33 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
     const ids = new Set(logs.map((l) => Number(l.id)).filter((n) => n > 0));
     pruneSyncedToServerIds(ids);
   }, [logs]);
+
+  useEffect(() => {
+    if (!normalizedQuery) {
+      setSearchProducts(products);
+      setIsSearching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsSearching(true);
+    const timer = window.setTimeout(() => {
+      fetch(`/api/products?q=${encodeURIComponent(normalizedQuery)}`, { signal: controller.signal })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error('search failed'))))
+        .then((data: SearchableProduct[]) => setSearchProducts(data))
+        .catch((error) => {
+          if (error.name !== 'AbortError') setSearchProducts(products);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setIsSearching(false);
+        });
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [normalizedQuery, products]);
 
   // Merge queue entries for the selected date into the displayed log list.
   const displayedLogs = useMemo(() => {
@@ -236,9 +266,11 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
             autoCorrect="off"
             spellCheck={false}
           />
-          {addQuery.trim() && (
+          {normalizedQuery && (
             <div className="calendar-add-results">
-              {allAddFamilies.length === 0 ? (
+              {isSearching ? (
+                <span className="muted" aria-live="polite">検索中...</span>
+              ) : allAddFamilies.length === 0 ? (
                 <span className="muted">商品が見つかりません</span>
               ) : (
                 <>

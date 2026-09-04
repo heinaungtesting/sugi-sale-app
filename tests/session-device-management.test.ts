@@ -25,7 +25,8 @@ describe('active device and session lifecycle', () => {
     expect(repository).toContain('DELETE FROM sugi_sessions WHERE expires_at <= now()');
     expect(repository).toContain('revokeOwnedSession');
     expect(repository).toContain('revokeUserSessions');
-    expect(repository).toContain("interval '5 minutes'");
+    expect(repository).not.toContain('export async function touchSession');
+    expect(source('lib/auth.ts')).toContain("interval '5 minutes'");
   });
 
   it('revokes all sessions after a PIN change and exposes active-device controls', () => {

@@ -13,7 +13,7 @@ export default async function SalesPage() {
   const todayDate = todaySaleDate();
   const month = todayDate.slice(0, 7);
   const [products, monthTotals, day] = await Promise.all([
-    listSearchableProducts(user.id, '', 1000),
+    listSearchableProducts(user.id, '', 60),
     salesByMonth(user.id, month),
     salesByDate(user.id, todayDate),
   ]);

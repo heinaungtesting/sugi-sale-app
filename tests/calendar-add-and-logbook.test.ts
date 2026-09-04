@@ -23,7 +23,9 @@ describe('calendar add and full logbook contract', () => {
     const css = source('app/globals.css');
     const resultsCss = css.slice(css.indexOf('.calendar-add-results'), css.indexOf('.calendar-add-family'));
 
-    expect(page).toContain("listSearchableProducts(user.id, '', 1000)");
+    expect(page).toContain("listSearchableProducts(user.id, '', 60)");
+    expect(client).toContain("fetch(`/api/products?q=${encodeURIComponent(normalizedQuery)}`");
+    expect(client).toContain('setSearchProducts(data)');
     expect(client).toContain('ADD_FAMILY_PAGE_SIZE = 12');
     expect(client).toContain('allAddFamilies');
     expect(client).toContain('setVisibleFamilyLimit');
@@ -37,7 +39,7 @@ describe('calendar add and full logbook contract', () => {
   it('shows a top-30 mostly-used product area under the home search bar', () => {
     const page = source('app/page.tsx');
     const logger = source('components/SearchProductLogger.tsx');
-    expect(page).toContain("listSearchableProducts(user.id, '', 300)");
+    expect(page).toContain("listSearchableProducts(user.id, '', 60)");
     expect(logger).toContain('mostlyUsedFamilies');
     expect(logger).toContain('Mostly used');
     expect(logger).toContain('よく使う商品');

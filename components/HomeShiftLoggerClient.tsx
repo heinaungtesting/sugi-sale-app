@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AppHeader } from '@/components/AppHeader';
 import { FeedbackWelcomePopup } from '@/components/FeedbackWelcomePopup';
@@ -310,7 +311,7 @@ export function HomeShiftLoggerClient({ user, products, todayDate, today, showFe
       <PageCard
         title={t.recentTitle}
         description={t.recentDescription}
-        action={<a href="/sales">{t.edit}</a>}
+        action={<Link href="/sales">{t.edit}</Link>}
         className="recent-card"
         aria-label={t.aria}
       >

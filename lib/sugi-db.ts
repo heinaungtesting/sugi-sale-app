@@ -179,12 +179,12 @@ async function querySearchProducts(text: string, params: unknown[]): Promise<Sea
 }
 
 export async function listSearchableProducts(userId: number, search = '', limit = 60): Promise<SearchableProduct[]> {
- await applyDueMonthlyPointCampaigns();
  const preparedSearch = prepareProductSearchQuery(search);
  if (!preparedSearch) throw new RangeError('invalid product search query');
  const previousMonth = getPreviousTokyoMonthKey();
   const hasSearch = preparedSearch.terms.length > 0;
   const safeLimit = Math.max(1, Math.min(Number(limit) || 60, hasSearch ? 200 : 1000));
+  const candidateLimit = hasSearch ? PRODUCT_SEARCH_CANDIDATE_LIMIT : safeLimit;
   const rows = await querySearchProducts(
     `WITH search_terms AS MATERIALIZED (
        SELECT DISTINCT term,
@@ -263,7 +263,7 @@ export async function listSearchableProducts(userId: number, search = '', limit 
        )
      ORDER BY search_score DESC, COALESCE(sc.sale_count, 0) DESC, p.product_name, pv.unit_count NULLS LAST, pv.id
      LIMIT $3`,
-    [userId, preparedSearch.terms, PRODUCT_SEARCH_CANDIDATE_LIMIT, previousMonth]
+    [userId, preparedSearch.terms, candidateLimit, previousMonth]
   );
   const products = hydrateSearchRows(rows);
   return rankProductsForSearch(products, preparedSearch.query, safeLimit);
@@ -495,17 +495,26 @@ function normalizeDatedSale(sale: DatedSale): DatedSale {
 export async function salesByDate(userId: number, soldDate: string): Promise<{ total_points: number; total_items: number; logs: DatedSale[] }> {
   const validDate = validSaleDate(soldDate);
   if (!validDate) return { total_points: 0, total_items: 0, logs: [] };
-  const summary = await queryOne<{ total_points: string | null; total_items: string | null }>(
-    `SELECT COALESCE(SUM(total_points), 0)::text AS total_points, COALESCE(SUM(quantity), 0)::text AS total_items
-     FROM sales_logs WHERE user_id = $1 AND sold_date = $2::date`,
-    [userId, validDate]
+  const rows = await query<DatedSale & { day_total_points: string; day_total_items: string }>(
+    `SELECT sales_logs.id, sales_logs.sold_date::text, sales_logs.product_name,
+            sales_logs.quantity, sales_logs.points_per_item, sales_logs.total_points,
+            COALESCE(products.category, $3::text) AS category,
+            sales_logs.created_at::text,
+            SUM(sales_logs.total_points) OVER ()::text AS day_total_points,
+            SUM(sales_logs.quantity) OVER ()::text AS day_total_items
+     FROM sales_logs
+     LEFT JOIN products ON products.id = sales_logs.product_id
+     WHERE sales_logs.user_id = $1 AND sales_logs.sold_date = $2::date
+     ORDER BY sales_logs.created_at DESC, sales_logs.id DESC`,
+    [userId, validDate, categoryLabel(null)]
   );
-  const logs = await query<DatedSale>(
-    `SELECT id, sold_date::text, product_name, quantity, points_per_item, total_points, created_at::text
-     FROM sales_logs WHERE user_id = $1 AND sold_date = $2::date ORDER BY created_at DESC, id DESC`,
-    [userId, validDate]
-  );
-  return { total_points: Number(summary?.total_points ?? 0), total_items: Number(summary?.total_items ?? 0), logs: logs.map(normalizeDatedSale) };
+  const first = rows[0];
+  const logs = rows.map(({ day_total_points: _points, day_total_items: _items, ...sale }) => normalizeDatedSale(sale));
+  return {
+    total_points: Number(first?.day_total_points ?? 0),
+    total_items: Number(first?.day_total_items ?? 0),
+    logs,
+  };
 }
 
 export async function salesByMonth(userId: number, month: string): Promise<MonthSaleTotal[]> {

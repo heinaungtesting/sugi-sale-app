@@ -5,7 +5,7 @@ import { createSessionToken, verifySessionToken, type SessionClaims } from './se
 import { logActivity } from './sugi-activity';
 import type { SessionUser } from './sugi-domain';
 import { describeDevice } from '../infrastructure/auth/device-description';
-import { createSessionRecord, revokeSession, touchSession } from '../repositories/session-repository';
+import { createSessionRecord, revokeSession } from '../repositories/session-repository';
 
 export const SESSION_COOKIE = 'sugi_session';
 export const PIN_POLICY = /^\d{6,}$/;
@@ -93,18 +93,30 @@ export async function clearSession(): Promise<void> {
 
 export async function getSessionUserFromClaims(claims: SessionClaims): Promise<SessionUser | null> {
   const row = await queryOne<UserRow>(
-    `SELECT u.id, u.username, u.display_name, u.role, u.pin_hash
+    `WITH valid_session AS MATERIALIZED (
+       SELECT user_id
+       FROM sugi_sessions
+       WHERE user_id = $1
+         AND jti = $2
+         AND revoked_at IS NULL
+         AND expires_at > now()
+     ), touched AS (
+       UPDATE sugi_sessions
+       SET last_used_at = now()
+       WHERE user_id = $1
+         AND jti = $2
+         AND last_used_at < now() - interval '5 minutes'
+         AND EXISTS (SELECT 1 FROM valid_session)
+       RETURNING user_id
+     )
+     SELECT u.id, u.username, u.display_name, u.role, u.pin_hash
      FROM sugi_users u
-     JOIN sugi_sessions s ON s.user_id = u.id
-     WHERE u.id = $1
-       AND s.jti = $2
-       AND u.is_active = TRUE
-       AND s.revoked_at IS NULL
-       AND s.expires_at > now()`,
+     JOIN valid_session s ON s.user_id = u.id
+     LEFT JOIN touched ON touched.user_id = s.user_id
+     WHERE u.is_active = TRUE`,
     [claims.id, claims.jti]
   );
   if (!row) return null;
-  await touchSession(claims.jti);
   return rowToSessionUser(row);
 }
 
