@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { PageCard } from '@/components/PageCard';
 import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/domain/products/search-ranking';
@@ -61,6 +61,10 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
   const [isSearching, setIsSearching] = useState(false);
   const [visibleFamilyLimit, setVisibleFamilyLimit] = useState(ADD_FAMILY_PAGE_SIZE);
   const [recentlyTapped, setRecentlyTapped] = useState<string | null>(null);
+  const [editingVariant, setEditingVariant] = useState<ProductVariant | null>(null);
+  const [pointEdit, setPointEdit] = useState('');
+  const [pointEditError, setPointEditError] = useState<string | null>(null);
+  const [isSavingPoints, setIsSavingPoints] = useState(false);
   const [queueSnapshot, setQueueSnapshot] = useState<QueueSnapshot>(() => getSnapshot());
   const totalByDate = useMemo(() => new Map(totals.map((t) => [t.sold_date, t])), [totals]);
   const cells = useMemo(() => buildCalendarCells(month), [month]);
@@ -176,7 +180,56 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
     const res = await csrfFetch(`/api/sales/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ delta }) });
     if (res.ok) { await refreshSelected(); router.refresh(); }
   }
-  async function addProductToSelectedDate(variant: ProductVariant) {
+  function closePointEditor() {
+    if (isSavingPoints) return;
+    setEditingVariant(null);
+    setPointEdit('');
+    setPointEditError(null);
+  }
+
+  async function saveVariantPoints(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingVariant || isSavingPoints) return;
+    const points = Number(pointEdit.normalize('NFKC').trim());
+    if (!Number.isInteger(points) || points <= 0 || points > 9999) {
+      setPointEditError('1〜9999の点数を入力してください。');
+      return;
+    }
+
+    setIsSavingPoints(true);
+    setPointEditError(null);
+    const response = await csrfFetch('/api/products', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_id: editingVariant.productId,
+        variant_id: editingVariant.variantId ?? null,
+        point_value: points,
+      }),
+    }).catch(() => null);
+    setIsSavingPoints(false);
+    if (!response?.ok) {
+      setPointEditError('点数を保存できませんでした。もう一度お試しください。');
+      return;
+    }
+
+    const savedVariant = editingVariant;
+    setEditingVariant(null);
+    setPointEdit('');
+    addProductToSelectedDate(savedVariant, points);
+  }
+
+  function handleAddProduct(variant: ProductVariant) {
+    if (variant.pointValue <= 0) {
+      setEditingVariant(variant);
+      setPointEdit('');
+      setPointEditError(null);
+      return;
+    }
+    addProductToSelectedDate(variant);
+  }
+
+  function addProductToSelectedDate(variant: ProductVariant, assignedPoints?: number) {
     const busyKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
     if (recentlyTapped === busyKey) return;
     triggerTapHaptic();
@@ -189,7 +242,7 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
       productId: variant.productId,
       variantId: variant.variantId ?? null,
       productName: variant.productName,
-      pointValue: variant.pointValue,
+      pointValue: assignedPoints ?? variant.pointValue,
       quantity: 1,
       soldDate: selectedDate,
     });
@@ -285,7 +338,7 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
                           const busyKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
                           const isDebouncing = recentlyTapped === busyKey;
                           return (
-                            <button key={busyKey} className="sale-tap-button" onClick={() => addProductToSelectedDate(variant)} disabled={isDebouncing} title={variant.productName} aria-busy={isDebouncing}>
+                            <button key={busyKey} className="sale-tap-button" onClick={() => handleAddProduct(variant)} disabled={isDebouncing} title={variant.productName} aria-busy={isDebouncing}>
                               {variantDisplayLabel(variant, family)}
                             </button>
                           );
@@ -338,6 +391,37 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
           })}
         </div>
       </PageCard>
+
+      {editingVariant && (
+        <div
+          className="point-editor-overlay"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) closePointEditor();
+          }}
+        >
+          <form className="point-editor-card" role="dialog" aria-modal="true" aria-labelledby="calendar-point-editor-title" onSubmit={saveVariantPoints}>
+            <h2 id="calendar-point-editor-title">記録前に点数を設定</h2>
+            <strong>{editingVariant.productName}</strong>
+            <label htmlFor="calendar-variant-point-edit">点数</label>
+            <input
+              id="calendar-variant-point-edit"
+              value={pointEdit}
+              onChange={(event) => setPointEdit(event.target.value)}
+              type="text"
+              inputMode="numeric"
+              enterKeyHint="done"
+              autoFocus
+              maxLength={4}
+              aria-invalid={Boolean(pointEditError)}
+            />
+            {pointEditError && <p className="point-editor-error" role="alert">{pointEditError}</p>}
+            <div className="point-editor-actions">
+              <button type="button" className="secondary" onClick={closePointEditor} disabled={isSavingPoints}>キャンセル</button>
+              <button type="submit" disabled={isSavingPoints}>保存して記録</button>
+            </div>
+          </form>
+        </div>
+      )}
     </section>
   );
 }
