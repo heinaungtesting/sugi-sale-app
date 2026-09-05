@@ -414,6 +414,7 @@ async function finalizeEntry(entry: QueueEntry, heldPersistentLease: boolean): P
     const finalized = await finalizeQueueRecord(entry, PAGE_QUEUE_OWNER).catch(() => null);
     if (finalized) {
       Object.assign(entry, finalized);
+      if (entry.status === 'pending') void registerBackgroundSync();
       emit();
       return;
     }

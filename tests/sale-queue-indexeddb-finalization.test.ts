@@ -68,17 +68,31 @@ function localStorageStub() {
 }
 
 describe('page sale queue IndexedDB lease finalization', () => {
+  let listeners: Record<string, Array<() => void>>;
+  let syncRegister: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.resetModules();
     fakeStore.records.clear();
+    listeners = {};
+    syncRegister = vi.fn(async () => undefined);
     vi.stubGlobal('window', {
       localStorage: localStorageStub(),
-      addEventListener: vi.fn(),
+      addEventListener: vi.fn((event: string, callback: () => void) => {
+        listeners[event] = [...(listeners[event] ?? []), callback];
+      }),
       removeEventListener: vi.fn(),
     });
     vi.stubGlobal('document', { cookie: 'sugi_csrf=test-token' });
-    vi.stubGlobal('navigator', { onLine: true });
+    vi.stubGlobal('navigator', {
+      onLine: true,
+      serviceWorker: {
+        ready: Promise.resolve({ sync: { register: syncRegister } }),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
     vi.stubGlobal('crypto', { randomUUID: () => 'indexeddb-finalize-key' });
     vi.stubGlobal('BroadcastChannel', undefined);
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -113,16 +127,22 @@ describe('page sale queue IndexedDB lease finalization', () => {
     });
     entry.attempts = 3;
 
-    await vi.advanceTimersByTimeAsync(14_600);
+    await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+    syncRegister.mockClear();
+    for (const callback of listeners.offline ?? []) callback();
+    await vi.advanceTimersByTimeAsync(1_600);
 
     expect(fakeStore.records.get('indexeddb-finalize-key')).toMatchObject({
       idempotencyKey: 'indexeddb-finalize-key',
       status: 'pending',
-      lastError: 'failed to log sale',
+      lastError: 'offline',
       retryable: true,
     });
     expect(fakeStore.records.get('indexeddb-finalize-key')).not.toHaveProperty('leaseOwner');
     expect(fakeStore.records.get('indexeddb-finalize-key')).not.toHaveProperty('leaseExpiresAt');
+    expect(syncRegister).toHaveBeenCalledTimes(1);
+    expect(syncRegister).toHaveBeenCalledWith('sugi-sale-queue-sync');
   });
 
   it('atomically stores a permanent failure and releases the page lease', async () => {
@@ -132,10 +152,12 @@ describe('page sale queue IndexedDB lease finalization', () => {
       if (url.includes('/api/sales/status')) {
         return { ok: true, json: async () => ({ accepted: [] }) } as Response;
       }
-      return new Response(JSON.stringify({ error: 'invalid product_id' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return new Promise<Response>((resolve) => setTimeout(() => resolve(
+        new Response(JSON.stringify({ error: 'invalid product_id' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ), 100));
     }));
     const queue = await import('../lib/sale-queue');
     queue.initSaleQueue(1);
@@ -148,6 +170,9 @@ describe('page sale queue IndexedDB lease finalization', () => {
     });
 
     await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+    syncRegister.mockClear();
+    await vi.advanceTimersByTimeAsync(100);
 
     expect(fakeStore.records.get('indexeddb-finalize-key')).toMatchObject({
       status: 'failed',
@@ -155,6 +180,7 @@ describe('page sale queue IndexedDB lease finalization', () => {
       retryable: false,
     });
     expect(fakeStore.records.get('indexeddb-finalize-key')).not.toHaveProperty('leaseOwner');
+    expect(syncRegister).not.toHaveBeenCalled();
   });
 
   it('atomically stores a successful sale and releases the page lease', async () => {
@@ -164,7 +190,7 @@ describe('page sale queue IndexedDB lease finalization', () => {
       if (url.includes('/api/sales/status')) {
         return { ok: true, json: async () => ({ accepted: [] }) } as Response;
       }
-      return {
+      return new Promise<Response>((resolve) => setTimeout(() => resolve({
         ok: true,
         json: async () => ({
           id: 9101,
@@ -176,7 +202,7 @@ describe('page sale queue IndexedDB lease finalization', () => {
           today_items: 1,
           idempotent_replay: false,
         }),
-      } as Response;
+      } as Response), 100));
     }));
     const queue = await import('../lib/sale-queue');
     queue.initSaleQueue(1);
@@ -189,6 +215,9 @@ describe('page sale queue IndexedDB lease finalization', () => {
     });
 
     await vi.advanceTimersByTimeAsync(1);
+    await Promise.resolve();
+    syncRegister.mockClear();
+    await vi.advanceTimersByTimeAsync(100);
 
     expect(fakeStore.records.get('indexeddb-finalize-key')).toMatchObject({
       status: 'synced',
@@ -196,5 +225,6 @@ describe('page sale queue IndexedDB lease finalization', () => {
     });
     expect(fakeStore.records.get('indexeddb-finalize-key')).not.toHaveProperty('retryable');
     expect(fakeStore.records.get('indexeddb-finalize-key')).not.toHaveProperty('leaseOwner');
+    expect(syncRegister).not.toHaveBeenCalled();
   });
 });
