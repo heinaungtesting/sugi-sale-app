@@ -163,3 +163,41 @@ git diff --stat HEAD~2
 git add tests/sale-queue-stuck-recovery.test.ts
 git commit -m "test: cover sale recovery after long outage"
 ```
+
+---
+
+### Task 4: Atomically finalize the page worker lease
+
+**Files:**
+- Modify: `infrastructure/queue/indexeddb-sale-queue-store.ts`
+- Modify: `lib/sale-queue.ts`
+- Test: `tests/indexeddb-sale-queue-finalization.test.ts`
+- Test: `tests/sale-queue-indexeddb-finalization.test.ts`
+
+**Interfaces:**
+- Produces: `finalizeQueueRecord(record, owner): Promise<StoredQueueRecord | null>`
+- Consumes: the lease owner returned by `claimQueueRecord`
+
+- [ ] **Step 1: Reproduce the active-lease write rejection**
+
+Create an IndexedDB-backed queue test where the page holds a live lease, finishes
+a transient request, and must persist `pending` before the 90-second expiry.
+
+- [ ] **Step 2: Verify the test fails**
+
+Run: `npm test -- tests/sale-queue-indexeddb-finalization.test.ts`
+
+Expected: FAIL because the authoritative record remains `sending`.
+
+- [ ] **Step 3: Add atomic finalization**
+
+Within one read-write transaction, verify that the stored `leaseOwner` belongs
+to the page worker, write the final status and retryability marker, and remove
+`leaseOwner` and `leaseExpiresAt`.
+
+- [ ] **Step 4: Verify every final state**
+
+Run: `npm test -- tests/indexeddb-sale-queue-finalization.test.ts tests/sale-queue-indexeddb-finalization.test.ts`
+
+Expected: transient `pending`, permanent `failed`, and successful `synced`
+records are durable with no remaining lease.

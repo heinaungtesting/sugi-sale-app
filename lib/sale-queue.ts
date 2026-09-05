@@ -17,7 +17,7 @@
 // This module is client-only. It must never be imported by server code.
 
 import type { TodaySale } from './sugi-domain';
-import { claimQueueRecord, loadLegacyQueueRecords, loadQueueRecords, queueStorageBackend, saveQueueRecords } from '../infrastructure/queue/indexeddb-sale-queue-store';
+import { claimQueueRecord, finalizeQueueRecord, loadLegacyQueueRecords, loadQueueRecords, queueStorageBackend, saveQueueRecords } from '../infrastructure/queue/indexeddb-sale-queue-store';
 import { reportQueueTelemetry } from '../infrastructure/queue/queue-telemetry';
 import { csrfFetch } from './csrf-client';
 
@@ -409,6 +409,26 @@ async function postOnce(entry: QueueEntry): Promise<PostResult> {
   }
 }
 
+async function finalizeEntry(entry: QueueEntry, heldPersistentLease: boolean): Promise<void> {
+  if (heldPersistentLease) {
+    const finalized = await finalizeQueueRecord(entry, PAGE_QUEUE_OWNER).catch(() => null);
+    if (finalized) {
+      Object.assign(entry, finalized);
+      emit();
+      return;
+    }
+    // Another worker may have taken an expired lease. Reload its authoritative
+    // record and reconcile any server receipt instead of overwriting its work.
+    await hydratePersistedQueue();
+    await reconcileAcceptedEntries();
+    return;
+  }
+  delete entry.leaseOwner;
+  delete entry.leaseExpiresAt;
+  persist();
+  emit();
+}
+
 async function sendEntry(entry: QueueEntry): Promise<void> {
   if (entry.status === 'synced') return;
   if (entry.ownerUserId !== activeUserId) return;
@@ -446,10 +466,7 @@ async function sendEntry(entry: QueueEntry): Promise<void> {
       entry.status = 'synced';
       entry.lastError = undefined;
       delete entry.retryable;
-      delete entry.leaseOwner;
-      delete entry.leaseExpiresAt;
-      persist();
-      emit();
+      await finalizeEntry(entry, claimed !== null);
       return;
     }
     lastError = result.error;
@@ -463,10 +480,7 @@ async function sendEntry(entry: QueueEntry): Promise<void> {
   // The periodic recovery drain will start another pass after connectivity returns.
   entry.retryable = !permanentFailure;
   entry.status = permanentFailure ? 'failed' : 'pending';
-  delete entry.leaseOwner;
-  delete entry.leaseExpiresAt;
-  persist();
-  emit();
+  await finalizeEntry(entry, claimed !== null);
 }
 
 async function drain(): Promise<void> {

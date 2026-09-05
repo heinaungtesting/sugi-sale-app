@@ -18,6 +18,9 @@ or the database recovers.
 - During IndexedDB hydration, recover legacy/stuck `failed` records only when
   their stored error is classified as transient. Permanent failed records remain
   available for manual correction.
+- Finalize a page worker's result and clear its active queue lease in one
+  IndexedDB transaction, preventing hydration from restoring a stale `sending`
+  snapshot before the 90-second lease expires.
 - Keep the current retry loop, health probe, service-worker replay, queue lease,
   and single-worker ordering behavior unchanged.
 
@@ -35,5 +38,7 @@ failed.
   entry becomes `synced`.
 - Add hydration tests proving an already-stuck transient record becomes
   `pending` while a permanent record stays `failed`.
+- Add IndexedDB-backed tests for transient, permanent, and successful
+  finalization while the page lease remains active.
 - Run the focused queue tests, then the complete test and production build
   checks.

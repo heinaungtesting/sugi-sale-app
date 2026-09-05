@@ -7,7 +7,7 @@ const DB_VERSION = 1;
 const STORE_NAME = 'sales';
 const LEGACY_KEY = 'sugi-sale-queue-v1';
 
-type StoredQueueRecord = Record<string, unknown> & {
+export type StoredQueueRecord = Record<string, unknown> & {
   idempotencyKey: string;
   ownerUserId?: number;
   status?: string;
@@ -156,6 +156,30 @@ export async function claimQueueRecord(
   } catch {
     return null;
   }
+}
+
+/**
+ * Persist a page worker's final result and release its lease in one transaction.
+ * This avoids a stale `sending` record winning over the page's completed state.
+ */
+export async function finalizeQueueRecord(
+  record: StoredQueueRecord,
+  owner: string,
+): Promise<StoredQueueRecord | null> {
+  const db = await openQueueDb();
+  const tx = db.transaction(STORE_NAME, 'readwrite');
+  const current = await tx.store.get(record.idempotencyKey);
+  const sameUser = Number(current?.ownerUserId) === Number(record.ownerUserId);
+  if (!current || !sameUser || current.leaseOwner !== owner) {
+    await tx.done;
+    return null;
+  }
+  const finalized: StoredQueueRecord = { ...record };
+  delete finalized.leaseOwner;
+  delete finalized.leaseExpiresAt;
+  await tx.store.put(finalized);
+  await tx.done;
+  return finalized;
 }
 
 export async function queueStorageBackend(): Promise<'indexeddb' | 'memory'> {
