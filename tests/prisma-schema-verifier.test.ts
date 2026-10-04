@@ -29,6 +29,7 @@ describe('Prisma schema verifier', () => {
       'product_unique_feature_items',
       'product_unique_summaries',
       'enrichment_audit',
+      'product_customer_info',
     ]);
     expect(expectedSchemaObjects.indexes).toEqual([
       'sugi_users_username_key',
@@ -65,6 +66,10 @@ describe('Prisma schema verifier', () => {
       'idx_puf_published',
       'idx_products_search_pgroonga',
       'idx_product_variants_search_pgroonga',
+      'product_customer_info_product_language_field_key',
+      'idx_pci_published',
+      'idx_pci_review_queue',
+      'idx_pci_content_version',
     ]);
     expect(expectedSchemaObjects.extensions).toEqual(['pg_trgm', 'pgroonga']);
   });

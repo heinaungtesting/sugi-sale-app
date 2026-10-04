@@ -315,16 +315,32 @@ describe('tokenless same-origin mutation guard', () => {
     expect(login).not.toContain('setCsrfCookie');
   });
 
+  // Machine-to-machine routes authenticate with a bearer token that browsers
+  // never attach automatically, so the browser same-origin guard does not apply.
+  // Each must verify its service token before doing anything else.
+  const SERVICE_TOKEN_ROUTES = ['app/api/admin/customer-info/ingest/route.ts'];
+
   it('keeps the same-origin guard on every mutation route, including login', () => {
     const routes = unsafeRoutes();
     expect(routes).toContain('app/api/auth/login/route.ts');
     for (const path of routes) {
+      if (SERVICE_TOKEN_ROUTES.includes(path)) continue;
       expect(importsCsrfGuard(source(path), path), `${path} must import the real CSRF guard`).toBe(true);
       for (const handler of unsafeHandlers(path)) {
         expect(
           hasEffectiveCsrfGuard(handler.source),
           `${path} ${handler.method} must call and return the CSRF guard`,
         ).toBe(true);
+      }
+    }
+  });
+
+  it('requires a service token as the first check on machine-to-machine routes', () => {
+    for (const path of SERVICE_TOKEN_ROUTES) {
+      expect(unsafeRoutes()).toContain(path);
+      for (const handler of unsafeHandlers(path)) {
+        const firstStatement = handler.source.trim().split('\n').find((line) => line.trim().startsWith('if'));
+        expect(firstStatement, `${path} ${handler.method} must check the service token first`).toContain('verifyServiceToken(req, process.env.CUSTOMER_INFO_INGEST_TOKEN)');
       }
     }
   });

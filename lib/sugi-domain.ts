@@ -43,6 +43,7 @@ export type ProductVariant = {
   pointValue: number;
   previousPointValue?: number | null;
   saleCount: number;
+  scope?: 'global' | 'private';
 };
 
 export type ProductFamily = {
@@ -296,6 +297,7 @@ export function groupProductsIntoFamilies(products: SearchableProduct[], limit?:
       pointValue,
       previousPointValue: product.previous_point_value ?? null,
       saleCount,
+      scope: product.scope,
     };
     const duplicateIndex = family.variants.findIndex((variant) => normalizeProductQuery(variant.label) === normalizeProductQuery(candidate.label));
     if (duplicateIndex >= 0) {

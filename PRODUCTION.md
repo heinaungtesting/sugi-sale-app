@@ -203,3 +203,13 @@ Sugi counter taps must succeed even when the store Wi-Fi drops. The app therefor
 - Backup and restore-verification units use `OnFailure=sugi-ops-alert@%n.service`.
 - `scripts/notify-ops-failure.sh` always writes a structured journal alert and optionally sends Telegram when `SUGI_OPS_TELEGRAM_BOT_TOKEN` and `SUGI_OPS_TELEGRAM_CHAT_ID` are configured.
 - Metrics are process-local and reset on restart; this is intentionally lightweight for the private deployment.
+
+## Customer product info cards
+
+Staff tap ⓘ on a product to show a reviewed English or Simplified Chinese card to a customer. Sections, in order: what makes it different, what it is for, risks, ingredients.
+
+- Migration: `prisma/migrations/20261004_product_customer_info` adds `products.product_type`, `products.risk_class`, and `product_customer_info`. It grants the runtime role `sugi_app` DML on the new table only when that role exists.
+- Hermes posts drafts to `POST /api/admin/customer-info/ingest` with `Authorization: Bearer $CUSTOMER_INFO_INGEST_TOKEN` (32+ characters; ingest is disabled while it is unset). Keep this route reachable only over Tailscale. Every row must cite official `enrichment_sources` rows, and translations must carry the `ja_source_hash` of the Japanese text they were made from.
+- Admins review at `/admin/customer-info`, field by field. A translation can be approved only after its Japanese source; changing the Japanese text marks its translations `stale` and hides them. Every approve, edit, and reject writes one `enrichment_audit` row. `scripts/enrich/publish.ts` never touches this table.
+- Devices cache published cards in IndexedDB (`sugi-customer-info`) from `/api/customer-info/bundle`, on each app load and every 6 hours, so cards open offline.
+- Repository SQL tests run against a disposable database with the migrations applied: `CUSTOMER_INFO_TEST_DATABASE_URL=postgresql://... npx vitest run tests/customer-info-repository.integration.test.ts` (the suite truncates product tables).

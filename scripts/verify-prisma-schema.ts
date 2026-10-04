@@ -21,6 +21,7 @@ export const expectedSchemaObjects = {
     'product_unique_feature_items',
     'product_unique_summaries',
     'enrichment_audit',
+    'product_customer_info',
   ],
   indexes: [
     'sugi_users_username_key',
@@ -57,6 +58,10 @@ export const expectedSchemaObjects = {
     'idx_puf_published',
     'idx_products_search_pgroonga',
     'idx_product_variants_search_pgroonga',
+    'product_customer_info_product_language_field_key',
+    'idx_pci_published',
+    'idx_pci_review_queue',
+    'idx_pci_content_version',
   ],
   extensions: ['pg_trgm', 'pgroonga'],
 } as const;
@@ -81,6 +86,12 @@ export const expectedSchemaSemantics = {
     { name: 'enrichment_jobs_status_check', definitionIncludes: ['status', 'queued', 'blocked'] },
     { name: 'product_unique_feature_items_confidence_check', definitionIncludes: ['confidence >= 0', 'confidence <= 1'] },
     { name: 'product_unique_summaries_confidence_check', definitionIncludes: ['confidence >= 0', 'confidence <= 1'] },
+    { name: 'products_product_type_check', definitionIncludes: ['product_type', 'medicine', 'kampo', 'supplement', 'other'] },
+    { name: 'products_risk_class_check', definitionIncludes: ['risk_class', 'class2', 'designated2', 'class3', 'quasi_drug', 'food'] },
+    { name: 'product_customer_info_language_check', definitionIncludes: ['language', 'ja', 'en', 'zh-hans'] },
+    { name: 'product_customer_info_field_key_check', definitionIncludes: ['field_key', 'unique_features', 'purpose', 'risks', 'ingredients'] },
+    { name: 'product_customer_info_status_check', definitionIncludes: ['status', 'draft', 'published', 'rejected', 'stale'] },
+    { name: 'product_customer_info_published_reviewed', definitionIncludes: ['published', 'reviewed_by is not null', 'reviewed_at is not null'] },
   ],
   foreignKeys: [
     { name: 'sugi_sessions_user_id_fkey', targetTable: 'sugi_users', deleteAction: 'CASCADE' },
@@ -104,6 +115,8 @@ export const expectedSchemaSemantics = {
     { name: 'product_unique_summaries_product_id_fkey', targetTable: 'products', deleteAction: 'CASCADE' },
     { name: 'enrichment_audit_job_id_fkey', targetTable: 'enrichment_jobs', deleteAction: 'SET NULL' },
     { name: 'enrichment_audit_product_id_fkey', targetTable: 'products', deleteAction: 'CASCADE' },
+    { name: 'product_customer_info_product_id_fkey', targetTable: 'products', deleteAction: 'CASCADE' },
+    { name: 'product_customer_info_reviewed_by_fkey', targetTable: 'sugi_users', deleteAction: 'NO ACTION' },
   ],
   generatedColumns: [
     { identifier: 'sales_logs.total_points', generation: 's', expressionIncludes: ['quantity', '*', 'points_per_item'] },
@@ -133,6 +146,9 @@ export const expectedSchemaSemantics = {
     { name: 'idx_puf_published', definitionIncludes: ['where', 'is_published', 'true'] },
     { name: 'idx_products_search_pgroonga', definitionIncludes: ['using pgroonga', 'product_name', 'nicknames'] },
     { name: 'idx_product_variants_search_pgroonga', definitionIncludes: ['using pgroonga', 'variant_label', 'display_shortcut', 'nicknames'] },
+    { name: 'product_customer_info_product_language_field_key', definitionIncludes: ['create unique index', 'product_id', 'language', 'field_key'] },
+    { name: 'idx_pci_published', definitionIncludes: ['where', 'published'] },
+    { name: 'idx_pci_review_queue', definitionIncludes: ['where', 'draft', 'stale'] },
   ],
   primaryUniqueKeys: [
     { name: 'sugi_users_pkey', constraintType: 'p', keyColumns: ['id'] },
@@ -151,6 +167,7 @@ export const expectedSchemaSemantics = {
     { name: 'product_unique_feature_items_pkey', constraintType: 'p', keyColumns: ['id'] },
     { name: 'product_unique_summaries_pkey', constraintType: 'p', keyColumns: ['product_id'] },
     { name: 'enrichment_audit_pkey', constraintType: 'p', keyColumns: ['id'] },
+    { name: 'product_customer_info_pkey', constraintType: 'p', keyColumns: ['id'] },
     { name: 'sugi_users_username_key', constraintType: 'u', keyColumns: ['username'] },
     { name: 'products_product_name_key', constraintType: 'u', keyColumns: ['product_name'] },
     { name: 'product_variants_product_id_variant_label_key', constraintType: 'u', keyColumns: ['product_id', 'variant_label'] },
@@ -176,6 +193,10 @@ export const expectedSchemaSemantics = {
     { identifier: 'product_unique_summaries.bullet_points', dataType: 'ARRAY', udtName: '_text', isNullable: 'NO', defaultIncludes: null },
     { identifier: 'product_unique_summaries.source_ids', dataType: 'ARRAY', udtName: '_int8', isNullable: 'NO', defaultIncludes: 'array[]' },
     { identifier: 'enrichment_audit.details', dataType: 'jsonb', udtName: 'jsonb', isNullable: 'NO', defaultIncludes: '{}' },
+    { identifier: 'products.product_type', dataType: 'text', udtName: 'text', isNullable: 'NO', defaultIncludes: 'other' },
+    { identifier: 'products.risk_class', dataType: 'text', udtName: 'text', isNullable: 'YES', defaultIncludes: null },
+    { identifier: 'product_customer_info.source_ids', dataType: 'ARRAY', udtName: '_int8', isNullable: 'NO', defaultIncludes: '{}' },
+    { identifier: 'product_customer_info.content_version', dataType: 'bigint', udtName: 'int8', isNullable: 'NO', defaultIncludes: 'customer_info_content_version_seq' },
   ],
 } as const;
 
