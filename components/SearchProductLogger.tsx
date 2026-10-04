@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/domain/products/search-ranking';
 import { enqueueSale, type QueueEntry } from '@/lib/sale-queue';
 import { csrfFetch } from '@/lib/csrf-client';
 import { triggerTapHaptic } from '@/lib/haptics';
+import { useCustomerInfoIndex } from '@/lib/customer-info-cache';
+import { CustomerInfoButton, CustomerInfoCard } from '@/components/CustomerInfoCard';
 
 type Language = 'en' | 'ja';
 
@@ -139,6 +141,8 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
   const [logAfterPointSave, setLogAfterPointSave] = useState(false);
   const [pointOverrides, setPointOverrides] = useState<Record<string, number>>({});
   const [showPreviousPoints, setShowPreviousPoints] = useState(false);
+  const [infoProduct, setInfoProduct] = useState<{ id: number; name: string } | null>(null);
+  const cardedProductIds = useCustomerInfoIndex();
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressTriggered = useRef(false);
   const t = copy[language];
@@ -200,12 +204,28 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
     return points > 0 ? `${t.previousPoints} ${points}pt` : `${t.previousPoints} ${t.previousNotEligible}`;
   }
 
+  // Customer info lives on the parent product; private quick-adds never get a card.
+  function infoButtonFor(family: ProductFamily) {
+    const shared = family.variants.filter((variant) => variant.scope !== 'private');
+    if (shared.length === 0) return null;
+    const target = shared.find((variant) => cardedProductIds.has(variant.productId)) ?? shared[0];
+    return (
+      <CustomerInfoButton
+        available={cardedProductIds.has(target.productId)}
+        productName={family.name}
+        onOpen={() => setInfoProduct({ id: target.productId, name: family.name })}
+      />
+    );
+  }
+
   const previousPointsToggle = (
     <label className="previous-points-toggle">
       <input type="checkbox" checked={showPreviousPoints} onChange={(event) => setShowPreviousPoints(event.target.checked)} />
       <span>{t.previousPointsToggle}</span>
     </label>
   );
+
+  const closeInfoCard = useCallback(() => setInfoProduct(null), []);
 
   function cancelLongPress() {
     if (longPressTimer.current) clearTimeout(longPressTimer.current);
@@ -403,6 +423,7 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
             {families.map((family, index) => (
               <section key={family.name} className={`family-card cute-family-card ${index < 2 ? 'featured-family-card' : ''}`.trim()} aria-label={family.name}>
                 <h3>{family.name}</h3>
+                {infoButtonFor(family)}
                 <div className="variant-grid">
                   {family.variants.map((variant) => {
                     const busyKey = busyKeyFor(variant);
@@ -472,6 +493,7 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
             {mostlyUsedFamilies.map((family, index) => (
               <section key={family.name} className={`family-card cute-family-card ${index < 2 ? 'featured-family-card' : ''}`.trim()} aria-label={family.name}>
                 <h3>{family.name}</h3>
+                {infoButtonFor(family)}
                 <div className="variant-grid">
                   {family.variants.map((variant) => {
                     const busyKey = busyKeyFor(variant);
@@ -532,6 +554,10 @@ export function SearchProductLogger({ userId, products, language, setTodaySummar
             </div>
           </form>
         </div>
+      )}
+
+      {infoProduct && (
+        <CustomerInfoCard productId={infoProduct.id} productName={infoProduct.name} onClose={closeInfoCard} />
       )}
 
       {toast && (

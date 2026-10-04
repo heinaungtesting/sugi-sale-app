@@ -22,6 +22,7 @@ describe('Prisma schema contract', () => {
     ['ProductUniqueFeatureItem', 'product_unique_feature_items'],
     ['ProductUniqueSummary', 'product_unique_summaries'],
     ['EnrichmentAudit', 'enrichment_audit'],
+    ['ProductCustomerInfo', 'product_customer_info'],
   ] as const;
 
   it.each(models)('maps %s to %s', (model, table) => {
@@ -54,5 +55,12 @@ describe('Prisma schema contract', () => {
     expect(schema).toMatch(
       /model EnrichmentSource \{[\s\S]*?domain\s+String\s+@default\(dbgenerated\(\)\)/,
     );
+  });
+
+  it('maps reviewed customer info with product classification', () => {
+    expect(schema).toMatch(/model Product \{[\s\S]*?productType\s+String\s+@default\("other"\)\s+@map\("product_type"\)/);
+    expect(schema).toMatch(/model Product \{[\s\S]*?riskClass\s+String\?\s+@map\("risk_class"\)/);
+    expect(schema).toMatch(/model ProductCustomerInfo \{[\s\S]*?@@unique\(\[productId, language, fieldKey\]/);
+    expect(schema).toMatch(/model ProductCustomerInfo \{[\s\S]*?reviewer\s+SugiUser\?\s+@relation/);
   });
 });

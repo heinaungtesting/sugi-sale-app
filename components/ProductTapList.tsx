@@ -1,9 +1,11 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useCallback, useState, type FormEvent } from 'react';
 import { enqueueSale } from '@/lib/sale-queue';
 import { csrfFetch } from '@/lib/csrf-client';
 import { triggerTapHaptic } from '@/lib/haptics';
+import { useCustomerInfoIndex } from '@/lib/customer-info-cache';
+import { CustomerInfoButton, CustomerInfoCard } from '@/components/CustomerInfoCard';
 
 type Product = { id: number; product_name: string; point_value: number; category: string; scope: string };
 
@@ -16,6 +18,9 @@ export function ProductTapList({ userId, products }: { userId: number; products:
   const [pointEditError, setPointEditError] = useState<string | null>(null);
   const [isSavingPoints, setIsSavingPoints] = useState(false);
   const [pointOverrides, setPointOverrides] = useState<Record<number, number>>({});
+  const [infoProduct, setInfoProduct] = useState<Product | null>(null);
+  const cardedProductIds = useCustomerInfoIndex();
+  const closeInfoCard = useCallback(() => setInfoProduct(null), []);
 
   function pointValueFor(product: Product) {
     return pointOverrides[product.id] ?? product.point_value;
@@ -94,22 +99,34 @@ export function ProductTapList({ userId, products }: { userId: number; products:
         {products.map((product) => {
           const isDebouncing = recentlyTapped === product.id;
           return (
-            <button
-              key={product.id}
-              className="product-row sale-tap-button"
-              onClick={() => handleProductClick(product)}
-              disabled={isDebouncing}
-              aria-busy={isDebouncing}
-            >
-              <span>
-                <strong>{product.product_name}</strong>
-                <span className="muted">Tap to log ×1</span>
-              </span>
-              <span className="points">{pointValueFor(product) > 0 ? `${pointValueFor(product)}pt` : '点数未設定'}</span>
-            </button>
+            <div key={product.id} className="product-row-with-info">
+              <button
+                className="product-row sale-tap-button"
+                onClick={() => handleProductClick(product)}
+                disabled={isDebouncing}
+                aria-busy={isDebouncing}
+              >
+                <span>
+                  <strong>{product.product_name}</strong>
+                  <span className="muted">Tap to log ×1</span>
+                </span>
+                <span className="points">{pointValueFor(product) > 0 ? `${pointValueFor(product)}pt` : '点数未設定'}</span>
+              </button>
+              {product.scope !== 'private' && (
+                <CustomerInfoButton
+                  available={cardedProductIds.has(product.id)}
+                  productName={product.product_name}
+                  onOpen={() => setInfoProduct(product)}
+                />
+              )}
+            </div>
           );
         })}
       </div>
+
+      {infoProduct && (
+        <CustomerInfoCard productId={infoProduct.id} productName={infoProduct.product_name} onClose={closeInfoCard} />
+      )}
 
       {editingProduct && (
         <div
