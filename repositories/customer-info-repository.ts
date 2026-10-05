@@ -17,6 +17,7 @@ import {
   type RiskClass,
   type RowStatus,
 } from '@/domain/customer-info/customer-info';
+import type { DraftRequestProduct } from '@/domain/customer-info/hermes';
 
 export function hashJaBody(body: string): string {
   return createHash('sha256').update(body, 'utf8').digest('hex');
@@ -428,4 +429,44 @@ export async function setProductClassification(
     });
     return true;
   });
+}
+
+// ── Hermes draft requests ────────────────────────────────────────────────────
+
+export async function getDraftRequestProduct(productId: number): Promise<DraftRequestProduct | null> {
+  const product = await queryOne<DbProduct & { category: string | null }>(
+    `SELECT p.id, p.product_name, p.category, p.product_type, p.risk_class
+     FROM products p WHERE p.id = $1 AND ${CARD_PRODUCT_FILTER}`,
+    [productId],
+  );
+  if (!product) return null;
+  const [existing, sources] = await Promise.all([
+    query<{ language: string; field_key: string; status: RowStatus; ja_source_hash: string | null }>(
+      `SELECT language, field_key, status, ja_source_hash FROM product_customer_info
+       WHERE product_id = $1 ORDER BY field_key, language`,
+      [productId],
+    ),
+    query<{ id: string; url: string; source_type: string }>(
+      `SELECT id, url, source_type FROM enrichment_sources
+       WHERE product_id = $1 AND is_official = TRUE AND source_type <> 'review_aggregate' AND fetch_status = 'ok'
+       ORDER BY id`,
+      [productId],
+    ),
+  ]);
+  return {
+    product_id: Number(product.id),
+    product_name: product.product_name,
+    category: product.category,
+    product_type: product.product_type,
+    risk_class: product.risk_class,
+    existing,
+    sources: sources.map((source) => ({ id: Number(source.id), url: source.url, source_type: source.source_type })),
+  };
+}
+
+export async function recordDraftRequest(productId: number, actor: { id: number; username: string }, details: Record<string, unknown>) {
+  await query(
+    `INSERT INTO enrichment_audit (product_id, event, actor, details) VALUES ($1, 'customer_info_draft_requested', $2, $3::jsonb)`,
+    [productId, actor.username, JSON.stringify({ requested_by_id: actor.id, ...details })],
+  );
 }

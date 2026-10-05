@@ -67,4 +67,14 @@ describe('customer info UI contract', () => {
     const ingest = source('app/api/admin/customer-info/ingest/route.ts');
     expect(ingest).not.toContain("'published'");
   });
+
+  it('lets admins set the Hermes endpoint and request drafts', () => {
+    const admin = source('components/AdminCustomerInfoClient.tsx');
+    expect(admin).toContain('Hermes APIエンドポイント');
+    expect(admin).toContain('type="url"');
+    expect(admin).toContain('type="password"');
+    expect(admin).toContain("'/api/admin/customer-info/hermes'");
+    expect(admin).toContain('/draft-request');
+    expect(admin).toContain('Hermesに下書きを依頼');
+  });
 });

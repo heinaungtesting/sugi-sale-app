@@ -108,6 +108,159 @@ function RowEditor({ row, productType, hasClaim, onChanged }: { row: QueueRow; p
   );
 }
 
+type HermesSettings = { endpoint_url: string | null; token_set: boolean; updated_at: string | null; updated_by: string | null };
+
+const HERMES_ERRORS: Record<string, string> = {
+  hermes_not_configured: '先にHermesのAPIエンドポイントを保存してください。',
+  hermes_timeout: 'Hermesが10秒以内に応答しませんでした。',
+  hermes_unreachable: 'Hermesに接続できませんでした。URLとネットワークを確認してください。',
+  hermes_rejected: 'Hermesが依頼を拒否しました。',
+};
+
+function HermesSettingsCard({ settings, onSaved }: { settings: HermesSettings; onSaved: (next: HermesSettings) => void }) {
+  const [endpoint, setEndpoint] = useState(settings.endpoint_url ?? '');
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function save(extra: Record<string, unknown> = {}) {
+    setBusy(true);
+    setMessage(null);
+    const response = await csrfFetch('/api/admin/customer-info/hermes', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint_url: endpoint, token: token || undefined, ...extra }),
+    }).catch(() => null);
+    setBusy(false);
+    const data = await response?.json().catch(() => null) as (HermesSettings & { error?: string }) | null;
+    if (!response?.ok || !data) {
+      setMessage({ ok: false, text: data?.error ?? '保存できませんでした。' });
+      return;
+    }
+    setToken('');
+    setEndpoint(data.endpoint_url ?? '');
+    onSaved(data);
+    setMessage({ ok: true, text: '保存しました' });
+  }
+
+  return (
+    <form
+      className="ci-hermes"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      <h2>Hermes 連携</h2>
+      <label>
+        Hermes APIエンドポイント
+        <input
+          type="url"
+          inputMode="url"
+          value={endpoint}
+          onChange={(event) => setEndpoint(event.target.value)}
+          placeholder="http://100.64.0.5:8787/customer-info/drafts"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          maxLength={500}
+        />
+      </label>
+      <label>
+        APIトークン（任意）
+        <input
+          type="password"
+          value={token}
+          onChange={(event) => setToken(event.target.value)}
+          placeholder={settings.token_set ? '設定済み（変更する場合のみ入力）' : '未設定'}
+          autoComplete="off"
+          maxLength={512}
+        />
+      </label>
+      <p className="muted">
+        「下書きを依頼」を押すと、このURLに商品情報をPOSTします。Hermesは下書きを
+        <code>/api/admin/customer-info/ingest</code> に送り返します。
+        {settings.updated_at && ` 最終更新: ${new Date(settings.updated_at).toLocaleString('ja-JP')}${settings.updated_by ? `（${settings.updated_by}）` : ''}`}
+      </p>
+      <div className="ci-actions">
+        <button type="submit" disabled={busy}>保存</button>
+        {settings.token_set && <button type="button" className="secondary" disabled={busy} onClick={() => void save({ clear_token: true })}>トークンを削除</button>}
+      </div>
+      {message && <p className={message.ok ? 'muted' : 'ci-error'} role={message.ok ? 'status' : 'alert'}>{message.text}</p>}
+    </form>
+  );
+}
+
+function DraftRequestButton({ productId, disabled }: { productId: number; disabled: boolean }) {
+  const [state, setState] = useState<{ busy: boolean; text: string | null; ok: boolean }>({ busy: false, text: null, ok: true });
+
+  async function request() {
+    setState({ busy: true, text: null, ok: true });
+    const response = await csrfFetch(`/api/admin/customer-info/products/${productId}/draft-request`, { method: 'POST' }).catch(() => null);
+    const data = await response?.json().catch(() => null) as { error?: string; job_id?: string | null; source_count?: number; hermes_status?: number | null } | null;
+    if (!response?.ok) {
+      const base = HERMES_ERRORS[data?.error ?? ''] ?? '依頼できませんでした。';
+      setState({ busy: false, ok: false, text: data?.hermes_status ? `${base}（HTTP ${data.hermes_status}）` : base });
+      return;
+    }
+    const sources = data?.source_count === 0 ? ' 公式出典がまだありません。' : '';
+    setState({ busy: false, ok: true, text: `依頼しました${data?.job_id ? `（ID: ${data.job_id}）` : ''}。下書きが届くとこの一覧に表示されます。${sources}` });
+  }
+
+  return (
+    <span className="ci-draft-request">
+      <button type="button" className="secondary" disabled={disabled || state.busy} onClick={() => void request()}>
+        {state.busy ? '依頼中…' : 'Hermesに下書きを依頼'}
+      </button>
+      {state.text && <span className={state.ok ? 'muted' : 'ci-error'} role={state.ok ? 'status' : 'alert'}>{state.text}</span>}
+    </span>
+  );
+}
+
+function ProductDraftSearch({ hermesReady }: { hermesReady: boolean }) {
+  const [term, setTerm] = useState('');
+  const [results, setResults] = useState<Array<{ id: number; product_name: string; is_active: boolean }>>([]);
+  const [searched, setSearched] = useState(false);
+
+  async function search() {
+    const query = term.trim();
+    if (!query) return;
+    const response = await fetch(`/api/admin/products?q=${encodeURIComponent(query)}`, { cache: 'no-store' }).catch(() => null);
+    const data = response?.ok ? await response.json() as Array<{ id: number; product_name: string; is_active: boolean }> : [];
+    setResults(data.filter((product) => product.is_active).slice(0, 20));
+    setSearched(true);
+  }
+
+  return (
+    <div className="ci-draft-search">
+      <h2>新しい商品の下書きを依頼</h2>
+      <form
+        className="ci-classification"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void search();
+        }}
+      >
+        <label>
+          商品名
+          <input value={term} onChange={(event) => setTerm(event.target.value)} placeholder="葛根湯" maxLength={120} />
+        </label>
+        <button type="submit" className="secondary">検索</button>
+      </form>
+      {!hermesReady && <p className="muted">HermesのAPIエンドポイントを保存すると依頼できます。</p>}
+      {searched && results.length === 0 && <p className="muted">該当する商品はありません。</p>}
+      <ul className="ci-draft-results">
+        {results.map((product) => (
+          <li key={product.id}>
+            <span>{product.product_name}</span>
+            <DraftRequestButton productId={product.id} disabled={!hermesReady} />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Classification({ product, onChanged }: { product: QueueProduct; onChanged: () => Promise<void> }) {
   const [productType, setProductType] = useState(product.product_type);
   const [riskClass, setRiskClass] = useState(product.risk_class ?? '');
@@ -144,8 +297,10 @@ function Classification({ product, onChanged }: { product: QueueProduct; onChang
   );
 }
 
-export function AdminCustomerInfoClient({ initialQueue }: { initialQueue: QueueProduct[] }) {
+export function AdminCustomerInfoClient({ initialQueue, initialHermes }: { initialQueue: QueueProduct[]; initialHermes: HermesSettings }) {
   const [queue, setQueue] = useState(initialQueue);
+  const [hermes, setHermes] = useState(initialHermes);
+  const hermesReady = Boolean(hermes.endpoint_url);
   const [statusFilter, setStatusFilter] = useState<'pending' | 'published' | 'rejected'>('pending');
 
   async function reload(filter = statusFilter) {
@@ -158,6 +313,8 @@ export function AdminCustomerInfoClient({ initialQueue }: { initialQueue: QueueP
     <section className="page-card admin-customer-info" aria-label="お客様向け商品情報のレビュー">
       <h1>お客様向け商品情報のレビュー</h1>
       <p className="muted">項目ごとに承認します。一括承認はありません。英語・中国語は日本語の原文を承認した後に承認できます。</p>
+      <HermesSettingsCard settings={hermes} onSaved={setHermes} />
+      <ProductDraftSearch hermesReady={hermesReady} />
       <div className="ci-filter" role="group" aria-label="表示">
         {(['pending', 'published', 'rejected'] as const).map((filter) => (
           <button
@@ -182,6 +339,7 @@ export function AdminCustomerInfoClient({ initialQueue }: { initialQueue: QueueP
         return (
           <article key={product.product_id} className="ci-product">
             <h2>{product.product_name}</h2>
+            <DraftRequestButton productId={product.product_id} disabled={!hermesReady} />
             <Classification product={product} onChanged={() => reload()} />
             {product.sources.length > 0 && (
               <details className="ci-sources">

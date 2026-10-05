@@ -22,6 +22,7 @@ export const expectedSchemaObjects = {
     'product_unique_summaries',
     'enrichment_audit',
     'product_customer_info',
+    'app_settings',
   ],
   indexes: [
     'sugi_users_username_key',
@@ -117,6 +118,7 @@ export const expectedSchemaSemantics = {
     { name: 'enrichment_audit_product_id_fkey', targetTable: 'products', deleteAction: 'CASCADE' },
     { name: 'product_customer_info_product_id_fkey', targetTable: 'products', deleteAction: 'CASCADE' },
     { name: 'product_customer_info_reviewed_by_fkey', targetTable: 'sugi_users', deleteAction: 'NO ACTION' },
+    { name: 'app_settings_updated_by_fkey', targetTable: 'sugi_users', deleteAction: 'SET NULL' },
   ],
   generatedColumns: [
     { identifier: 'sales_logs.total_points', generation: 's', expressionIncludes: ['quantity', '*', 'points_per_item'] },
@@ -168,6 +170,7 @@ export const expectedSchemaSemantics = {
     { name: 'product_unique_summaries_pkey', constraintType: 'p', keyColumns: ['product_id'] },
     { name: 'enrichment_audit_pkey', constraintType: 'p', keyColumns: ['id'] },
     { name: 'product_customer_info_pkey', constraintType: 'p', keyColumns: ['id'] },
+    { name: 'app_settings_pkey', constraintType: 'p', keyColumns: ['key'] },
     { name: 'sugi_users_username_key', constraintType: 'u', keyColumns: ['username'] },
     { name: 'products_product_name_key', constraintType: 'u', keyColumns: ['product_name'] },
     { name: 'product_variants_product_id_variant_label_key', constraintType: 'u', keyColumns: ['product_id', 'variant_label'] },

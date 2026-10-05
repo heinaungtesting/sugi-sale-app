@@ -3675,3 +3675,11 @@ button:active { transform: scale(.97); }
 .ci-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .ci-blocked, .ci-error { margin: 0; color: #9a3412; font-size: 13px; font-weight: 700; }
 .ci-sources ul { margin: 6px 0 0; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
+.ci-hermes, .ci-draft-search { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border-soft, #eadbc2); border-radius: 14px; background: var(--cream-surface, #fffdf7); }
+.ci-hermes h2, .ci-draft-search h2 { margin: 0; font-size: 16px; }
+.ci-hermes label { display: grid; gap: 2px; font-size: 13px; }
+.ci-hermes input { width: 100%; }
+.ci-hermes code { font-size: 12px; overflow-wrap: anywhere; }
+.ci-draft-request { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; }
+.ci-draft-results { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ci-draft-results li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }

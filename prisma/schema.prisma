@@ -28,6 +28,7 @@ model SugiUser {
   activityActors           SugiActivityLog[]          @relation("ActivityActor")
   reviewedFeatureItems     ProductUniqueFeatureItem[]
   reviewedCustomerInfo     ProductCustomerInfo[]
+  updatedSettings          AppSetting[]
 
   @@map("sugi_users")
   @@schema("sugi")
@@ -341,5 +342,16 @@ model ProductCustomerInfo {
   @@unique([productId, language, fieldKey], map: "product_customer_info_product_language_field_key")
   @@index([contentVersion], map: "idx_pci_content_version")
   @@map("product_customer_info")
+  @@schema("sugi")
+}
+
+model AppSetting {
+  key       String    @id
+  value     Json      @default("{}") @db.JsonB
+  updatedBy BigInt?   @map("updated_by")
+  updatedAt DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updater   SugiUser? @relation(fields: [updatedBy], references: [id], onDelete: SetNull)
+
+  @@map("app_settings")
   @@schema("sugi")
 }
