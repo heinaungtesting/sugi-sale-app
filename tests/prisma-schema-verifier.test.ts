@@ -30,6 +30,7 @@ describe('Prisma schema verifier', () => {
       'product_unique_summaries',
       'enrichment_audit',
       'product_customer_info',
+      'app_settings',
     ]);
     expect(expectedSchemaObjects.indexes).toEqual([
       'sugi_users_username_key',

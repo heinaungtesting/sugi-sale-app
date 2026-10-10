@@ -23,6 +23,7 @@ describe('Prisma schema contract', () => {
     ['ProductUniqueSummary', 'product_unique_summaries'],
     ['EnrichmentAudit', 'enrichment_audit'],
     ['ProductCustomerInfo', 'product_customer_info'],
+    ['AppSetting', 'app_settings'],
   ] as const;
 
   it.each(models)('maps %s to %s', (model, table) => {

@@ -44,9 +44,6 @@ describe.skipIf(!databaseUrl)('customer info repository (PostgreSQL)', () => {
     reviewSource = Number(sources.rows[1].id);
   });
 
-  afterAll(async () => {
-    await pool?.end();
-  });
 
   it('refuses private products and non-official sources', async () => {
     const row = { language: 'ja' as const, field_key: 'purpose' as const, body: '風邪のひきはじめに', source_ids: [officialSource], ja_source_hash: null, model_id: null, prompt_version: null };
@@ -134,4 +131,46 @@ describe.skipIf(!databaseUrl)('customer info repository (PostgreSQL)', () => {
     await expect(pool.query(`UPDATE product_customer_info SET status = 'published', reviewed_by = NULL WHERE id = $1`, [await rowId('en', 'risks')]))
       .rejects.toThrow(/product_customer_info_published_reviewed/);
   });
+});
+
+describe.skipIf(!databaseUrl)('Hermes settings and draft requests (PostgreSQL)', () => {
+  it('stores the endpoint, keeps the token unless replaced, and hides it publicly', async () => {
+    process.env.DATABASE_URL = databaseUrl;
+    const { pool } = await import('@/lib/db');
+    const settings = await import('@/repositories/app-settings-repository');
+    const repo = await import('@/repositories/customer-info-repository');
+    await pool.query('DELETE FROM app_settings');
+    const user = await pool.query(`SELECT id FROM sugi_users ORDER BY id LIMIT 1`);
+    const userId = Number(user.rows[0].id);
+
+    await settings.saveHermesSettings({ endpoint_url: 'http://100.64.0.5:8787/drafts', token: 't'.repeat(20) }, userId);
+    await settings.saveHermesSettings({ endpoint_url: 'http://100.64.0.5:9000/drafts', token: undefined }, userId);
+    const stored = await settings.getHermesSettings();
+    expect(stored).toMatchObject({ endpoint_url: 'http://100.64.0.5:9000/drafts', token: 't'.repeat(20), updated_by: 'Reviewer' });
+    expect(settings.publicHermesSettings(stored)).not.toHaveProperty('token');
+
+    await settings.saveHermesSettings({ endpoint_url: null, token: null }, userId);
+    expect((await settings.getHermesSettings()).endpoint_url).toBeNull();
+
+    const product = await pool.query(`SELECT id FROM products WHERE user_id IS NULL LIMIT 1`);
+    const draft = await repo.getDraftRequestProduct(Number(product.rows[0].id));
+    expect(draft?.sources.map((source) => source.source_type)).toEqual(['official_pdf']);
+    expect(draft?.existing.length).toBeGreaterThan(0);
+    const jaRow = draft?.existing.find((row) => row.language === 'ja' && row.field_key === 'purpose');
+    expect(jaRow?.body).toBe('JA purpose (改訂)');
+    expect(jaRow?.ja_source_hash).toBe(repo.hashJaBody('JA purpose (改訂)'));
+    expect(draft?.existing.find((row) => row.language === 'en')?.body).toBeNull();
+    const privateProduct = await pool.query(`SELECT id FROM products WHERE user_id IS NOT NULL LIMIT 1`);
+    expect(await repo.getDraftRequestProduct(Number(privateProduct.rows[0].id))).toBeNull();
+
+    await repo.recordDraftRequest(Number(product.rows[0].id), { id: userId, username: 'reviewer' }, { outcome: 'accepted' });
+    const audit = await pool.query(`SELECT details FROM enrichment_audit WHERE event = 'customer_info_draft_requested'`);
+    expect(audit.rows[0].details).toMatchObject({ outcome: 'accepted', requested_by_id: userId });
+  });
+});
+
+afterAll(async () => {
+  if (!databaseUrl) return;
+  const { pool } = await import('@/lib/db');
+  await pool.end();
 });
