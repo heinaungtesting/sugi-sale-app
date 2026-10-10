@@ -54,7 +54,8 @@ export type DraftRequestProduct = {
   category: string | null;
   product_type: ProductType;
   risk_class: RiskClass | null;
-  existing: Array<{ language: string; field_key: string; status: RowStatus; ja_source_hash: string | null }>;
+  /** body is filled for Japanese rows only, so Hermes can translate the current source text. */
+  existing: Array<{ language: string; field_key: string; status: RowStatus; ja_source_hash: string | null; body: string | null }>;
   sources: Array<{ id: number; url: string; source_type: string }>;
 };
 

@@ -441,8 +441,10 @@ export async function getDraftRequestProduct(productId: number): Promise<DraftRe
   );
   if (!product) return null;
   const [existing, sources] = await Promise.all([
-    query<{ language: string; field_key: string; status: RowStatus; ja_source_hash: string | null }>(
-      `SELECT language, field_key, status, ja_source_hash FROM product_customer_info
+    query<{ language: string; field_key: string; status: RowStatus; ja_source_hash: string | null; body: string | null }>(
+      `SELECT language, field_key, status, ja_source_hash,
+              CASE WHEN language = 'ja' THEN body END AS body
+       FROM product_customer_info
        WHERE product_id = $1 ORDER BY field_key, language`,
       [productId],
     ),

@@ -156,6 +156,10 @@ describe.skipIf(!databaseUrl)('Hermes settings and draft requests (PostgreSQL)',
     const draft = await repo.getDraftRequestProduct(Number(product.rows[0].id));
     expect(draft?.sources.map((source) => source.source_type)).toEqual(['official_pdf']);
     expect(draft?.existing.length).toBeGreaterThan(0);
+    const jaRow = draft?.existing.find((row) => row.language === 'ja' && row.field_key === 'purpose');
+    expect(jaRow?.body).toBe('JA purpose (改訂)');
+    expect(jaRow?.ja_source_hash).toBe(repo.hashJaBody('JA purpose (改訂)'));
+    expect(draft?.existing.find((row) => row.language === 'en')?.body).toBeNull();
     const privateProduct = await pool.query(`SELECT id FROM products WHERE user_id IS NOT NULL LIMIT 1`);
     expect(await repo.getDraftRequestProduct(Number(privateProduct.rows[0].id))).toBeNull();
 
