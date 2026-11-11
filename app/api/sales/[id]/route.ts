@@ -26,7 +26,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const body = await req.json().catch(() => ({}));
   if (body.point_value !== undefined) {
     const pointValue = Number(body.point_value);
-    if (!Number.isInteger(saleId) || saleId <= 0 || !Number.isFinite(pointValue) || pointValue <= 0) return Response.json({ error: 'invalid request' }, { status: 400 });
+    if (!Number.isInteger(saleId) || saleId <= 0 || !Number.isInteger(pointValue) || pointValue <= 0 || pointValue > 9999) return Response.json({ error: 'invalid request' }, { status: 400 });
     const sale = await updateSalePoints(user.id, saleId, pointValue);
     if (!sale) return Response.json({ error: 'sale not found' }, { status: 404 });
     await logActivity({ userId: user.id, actorUserId: user.id, action: 'sale_points_corrected', summary: `販売点数修正: ${sale.product_name} → ${pointValue}pt`, details: { sale_id: saleId, product_name: sale.product_name, point_value: pointValue, quantity: sale.quantity, total_points: sale.total_points } });

@@ -8,7 +8,7 @@ describe('zero-point product sale entry', () => {
   it('asks for and saves points before queueing a calendar sale', () => {
     const calendar = source('components/SalesCalendarClient.tsx');
 
-    expect(calendar).toContain('if (variant.pointValue <= 0)');
+    expect(calendar).toContain('if (pointValueFor(variant) <= 0)');
     expect(calendar).toContain('setEditingVariant(variant)');
     expect(calendar).toContain("csrfFetch('/api/products'");
     expect(calendar).toContain("method: 'PATCH'");

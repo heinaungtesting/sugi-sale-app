@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { PageCard } from '@/components/PageCard';
 import { groupProductsIntoFamilies, rankProductsForSearch, type ProductFamily, type ProductVariant, type SearchableProduct } from '@/domain/products/search-ranking';
@@ -26,6 +26,7 @@ type Props = {
 const TAP_DEBOUNCE_MS = 250;
 const SEARCH_DEBOUNCE_MS = 200;
 const ADD_FAMILY_PAGE_SIZE = 12;
+const LONG_PRESS_MS = 550;
 
 function monthLabel(month: string) {
   const [year, m] = month.split('-').map(Number);
@@ -65,6 +66,16 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
   const [pointEdit, setPointEdit] = useState('');
   const [pointEditError, setPointEditError] = useState<string | null>(null);
   const [isSavingPoints, setIsSavingPoints] = useState(false);
+  const [logAfterPointSave, setLogAfterPointSave] = useState(false);
+  const [pointOverrides, setPointOverrides] = useState<Record<string, number>>({});
+  const [editingSale, setEditingSale] = useState<SaleLog | null>(null);
+  const [salePointEdit, setSalePointEdit] = useState('');
+  const [salePointError, setSalePointError] = useState<string | null>(null);
+  const [isSavingSalePoints, setIsSavingSalePoints] = useState(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTriggered = useRef(false);
+  const dateRequest = useRef(0);
+  const monthRequest = useRef(0);
   const [queueSnapshot, setQueueSnapshot] = useState<QueueSnapshot>(() => getSnapshot());
   const totalByDate = useMemo(() => new Map(totals.map((t) => [t.sold_date, t])), [totals]);
   const cells = useMemo(() => buildCalendarCells(month), [month]);
@@ -76,6 +87,10 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
   }, [normalizedQuery, searchProducts]);
   const addFamilies = allAddFamilies.slice(0, visibleFamilyLimit);
   const hiddenFamilyCount = Math.max(0, allAddFamilies.length - addFamilies.length);
+
+  useEffect(() => () => {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+  }, []);
 
   useEffect(() => {
     const dispose = initSaleQueue(userId);
@@ -121,6 +136,30 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
     };
   }, [normalizedQuery, products]);
 
+  useEffect(() => {
+    const needsRefresh = queueSnapshot.entries.some((entry) =>
+      entry.soldDate === selectedDate && entry.status === 'synced' && entry.sale &&
+      !logs.some((log) => Number(log.id) === Number(entry.sale!.id)));
+    if (!needsRefresh) return;
+    const controller = new AbortController();
+    const request = ++dateRequest.current;
+    const monthVersion = monthRequest.current;
+    void Promise.all([
+      fetch(`/api/sales/date?date=${selectedDate}`, { signal: controller.signal }),
+      fetch(`/api/sales/month?month=${month}`, { signal: controller.signal }),
+    ]).then(async ([dateResponse, monthResponse]) => {
+      const data = dateResponse.ok ? await dateResponse.json() : null;
+      const monthData = monthResponse.ok ? await monthResponse.json() : null;
+      if (controller.signal.aborted || request !== dateRequest.current) return;
+      if (data) {
+        setLogs(data.logs);
+        setSummary({ total_points: data.total_points, total_items: data.total_items });
+      }
+      if (monthData && monthVersion === monthRequest.current) setTotals(monthData);
+    }).catch(() => {});
+    return () => controller.abort();
+  }, [queueSnapshot, logs, selectedDate, month]);
+
   // Merge queue entries for the selected date into the displayed log list.
   const displayedLogs = useMemo(() => {
     const serverIds = new Set(logs.map((l) => Number(l.id)));
@@ -154,18 +193,24 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
   }, [logs, queueSnapshot, selectedDate]);
 
   async function loadDate(date: string) {
+    const request = ++dateRequest.current;
     setSelectedDate(date);
     if (date.slice(0, 7) !== month) await loadMonth(date.slice(0, 7));
     const res = await fetch(`/api/sales/date?date=${date}`);
     if (!res.ok) return;
     const data = await res.json();
+    if (request !== dateRequest.current) return;
     setLogs(data.logs);
     setSummary({ total_points: data.total_points, total_items: data.total_items });
   }
   async function loadMonth(nextMonth: string) {
+    const request = ++monthRequest.current;
     setMonth(nextMonth);
     const res = await fetch(`/api/sales/month?month=${nextMonth}`);
-    if (res.ok) setTotals(await res.json());
+    if (res.ok) {
+      const data = await res.json();
+      if (request === monthRequest.current) setTotals(data);
+    }
   }
   async function refreshSelected() {
     await loadDate(selectedDate);
@@ -182,6 +227,8 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
   }
   function closePointEditor() {
     if (isSavingPoints) return;
+    longPressTriggered.current = false;
+    setLogAfterPointSave(false);
     setEditingVariant(null);
     setPointEdit('');
     setPointEditError(null);
@@ -214,16 +261,47 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
     }
 
     const savedVariant = editingVariant;
+    const shouldLog = logAfterPointSave;
+    setPointOverrides((current) => ({ ...current, [`${savedVariant.productId}:${savedVariant.variantId ?? 'base'}`]: points }));
+    setLogAfterPointSave(false);
+    longPressTriggered.current = false;
     setEditingVariant(null);
     setPointEdit('');
-    addProductToSelectedDate(savedVariant, points);
+    if (shouldLog) addProductToSelectedDate(savedVariant, points);
+  }
+
+  function pointValueFor(variant: ProductVariant) {
+    return pointOverrides[`${variant.productId}:${variant.variantId ?? 'base'}`] ?? variant.pointValue;
+  }
+
+  function openPointEditor(variant: ProductVariant, shouldLog = false) {
+    setEditingVariant(variant);
+    setLogAfterPointSave(shouldLog);
+    setPointEdit(shouldLog ? '' : String(pointValueFor(variant)));
+    setPointEditError(null);
+  }
+
+  function cancelLongPress() {
+    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+  }
+
+  function startLongPress(variant: ProductVariant) {
+    cancelLongPress();
+    longPressTriggered.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressTriggered.current = true;
+      openPointEditor(variant);
+    }, LONG_PRESS_MS);
   }
 
   function handleAddProduct(variant: ProductVariant) {
-    if (variant.pointValue <= 0) {
-      setEditingVariant(variant);
-      setPointEdit('');
-      setPointEditError(null);
+    if (longPressTriggered.current) {
+      longPressTriggered.current = false;
+      return;
+    }
+    if (pointValueFor(variant) <= 0) {
+      openPointEditor(variant, true);
       return;
     }
     addProductToSelectedDate(variant);
@@ -242,21 +320,52 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
       productId: variant.productId,
       variantId: variant.variantId ?? null,
       productName: variant.productName,
-      pointValue: assignedPoints ?? variant.pointValue,
+      pointValue: assignedPoints ?? pointValueFor(variant),
       quantity: 1,
       soldDate: selectedDate,
     });
     setAddQuery('');
     setVisibleFamilyLimit(ADD_FAMILY_PAGE_SIZE);
-    // Pull canonical data shortly after the queue likely lands; the optimistic row
-    // gets replaced with the real one once the server response arrives via the
-    // queue snapshot subscription.
-    setTimeout(() => {
-      void refreshSelected();
-    }, 1500);
   }
   async function jumpTo(date: string) {
+    if (isSavingSalePoints) return;
+    setEditingSale(null);
+    setSalePointError(null);
     await loadDate(date);
+  }
+
+  async function saveSalePoints(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingSale || isSavingSalePoints) return;
+    const points = Number(salePointEdit.normalize('NFKC').trim());
+    if (!Number.isInteger(points) || points <= 0 || points > 9999) {
+      setSalePointError('1〜9999の点数を入力してください。');
+      return;
+    }
+    // A displayed row can combine multiple older records with the same name and
+    // points. Correct all of its server records so its full quantity is updated.
+    const ids = logs.filter((log) => log.product_name === editingSale.product_name && log.points_per_item === editingSale.points_per_item).map((log) => log.id);
+    setIsSavingSalePoints(true);
+    setSalePointError(null);
+    const results = await Promise.all(ids.map((id) => csrfFetch(`/api/sales/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ point_value: points }),
+    }).catch(() => null)));
+    if (results.length === 0 || results.some((res) => !res?.ok)) {
+      setSalePointError('点数を保存できませんでした。もう一度お試しください。');
+      setIsSavingSalePoints(false);
+      return;
+    }
+    try {
+      await refreshSelected();
+      setEditingSale(null);
+      router.refresh();
+    } catch {
+      setSalePointError('点数は保存されました。最新の記録を表示するにはページを再読み込みしてください。');
+    } finally {
+      setIsSavingSalePoints(false);
+    }
   }
 
   const today = tokyoToday();
@@ -306,6 +415,7 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
 
         <div className="calendar-add-inline" aria-label="選択日に商品を追加">
           <label htmlFor="calendar-add-search">選択日に商品を追加</label>
+          <p className="calendar-add-help">タップで×1を記録。長押しまたは「点数変更」で点数を変更できます。</p>
           <input
             id="calendar-add-search"
             className="calendar-add-input"
@@ -338,9 +448,13 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
                           const busyKey = `${variant.productId}:${variant.variantId ?? 'base'}`;
                           const isDebouncing = recentlyTapped === busyKey;
                           return (
-                            <button key={busyKey} className="sale-tap-button" onClick={() => handleAddProduct(variant)} disabled={isDebouncing} title={variant.productName} aria-busy={isDebouncing}>
-                              {variantDisplayLabel(variant, family)}
-                            </button>
+                            <div key={busyKey} className="calendar-variant-actions">
+                              <button className="sale-tap-button" onPointerDown={() => startLongPress(variant)} onPointerUp={cancelLongPress} onPointerLeave={cancelLongPress} onPointerCancel={cancelLongPress} onContextMenu={(event) => event.preventDefault()} onClick={() => handleAddProduct(variant)} disabled={isDebouncing} title={variant.productName} aria-busy={isDebouncing}>
+                                {variantDisplayLabel(variant, family)}
+                                <small>{pointValueFor(variant) > 0 ? `${pointValueFor(variant)}pt` : '点数未設定'}</small>
+                              </button>
+                              <button type="button" className="calendar-point-edit" aria-label={`${variant.productName}の点数を変更`} onClick={() => openPointEditor(variant)}>点数変更</button>
+                            </div>
                           );
                         })}
                       </div>
@@ -373,19 +487,36 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
               <article className={className} key={`${log._queueKey ?? 'srv'}-${log.id}`}>
                 <div>
                   <strong>{log.product_name}</strong>
-                  <span>×{log.quantity} = {log.total_points}pt</span>
+                  <span>{log.points_per_item}pt ×{log.quantity} = {log.total_points}pt</span>
                 </div>
                 <div className="small-actions sale-controls">
                   {log._queueKey ? (
                     <span className="muted" aria-hidden="true">↻</span>
                   ) : (
                     <>
-                      <button aria-label={`${log.product_name}を減らす`} onClick={() => changeQty(log.id, -1)}>−</button>
-                      <button aria-label={`${log.product_name}を増やす`} onClick={() => changeQty(log.id, 1)}>+</button>
-                      <button className="danger-soft" onClick={() => deleteLog(log.id)}>削除</button>
+                      <button aria-label={`${log.product_name}を減らす`} onClick={() => changeQty(log.id, -1)} disabled={isSavingSalePoints}>−</button>
+                      <button aria-label={`${log.product_name}を増やす`} onClick={() => changeQty(log.id, 1)} disabled={isSavingSalePoints}>+</button>
+                      <button className="danger-soft" onClick={() => deleteLog(log.id)} disabled={isSavingSalePoints}>削除</button>
                     </>
                   )}
                 </div>
+                {!log._queueKey && (
+                  editingSale?.id === log.id ? (
+                    <form className="calendar-sale-point-form" onSubmit={saveSalePoints}>
+                      <label htmlFor={`sale-points-${log.id}`}>1点あたりの点数</label>
+                      <input id={`sale-points-${log.id}`} type="text" inputMode="numeric" value={salePointEdit} onChange={(event) => { setSalePointEdit(event.target.value); setSalePointError(null); }} maxLength={4} autoFocus disabled={isSavingSalePoints} aria-invalid={Boolean(salePointError)} aria-describedby={salePointError ? `sale-point-error-${log.id}` : undefined} />
+                      <button type="submit" disabled={isSavingSalePoints}>{isSavingSalePoints ? '保存中...' : '点数保存'}</button>
+                      <button type="button" className="secondary" onClick={() => setEditingSale(null)} disabled={isSavingSalePoints}>キャンセル</button>
+                      {salePointError && <p id={`sale-point-error-${log.id}`} role="alert">{salePointError}</p>}
+                    </form>
+                  ) : (
+                    <button type="button" className="calendar-point-edit" disabled={isSavingSalePoints} aria-label={`${log.product_name}の記録の点数を変更`} onClick={() => {
+                      setEditingSale(log);
+                      setSalePointEdit(String(log.points_per_item));
+                      setSalePointError(null);
+                    }}>点数変更</button>
+                  )
+                )}
               </article>
             );
           })}
@@ -400,7 +531,7 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
           }}
         >
           <form className="point-editor-card" role="dialog" aria-modal="true" aria-labelledby="calendar-point-editor-title" onSubmit={saveVariantPoints}>
-            <h2 id="calendar-point-editor-title">記録前に点数を設定</h2>
+            <h2 id="calendar-point-editor-title">{logAfterPointSave ? '記録前に点数を設定' : '点数を変更'}</h2>
             <strong>{editingVariant.productName}</strong>
             <label htmlFor="calendar-variant-point-edit">点数</label>
             <input
@@ -417,7 +548,7 @@ export function SalesCalendarClient({ userId, products, initialMonth, initialDat
             {pointEditError && <p className="point-editor-error" role="alert">{pointEditError}</p>}
             <div className="point-editor-actions">
               <button type="button" className="secondary" onClick={closePointEditor} disabled={isSavingPoints}>キャンセル</button>
-              <button type="submit" disabled={isSavingPoints}>保存して記録</button>
+              <button type="submit" disabled={isSavingPoints}>{logAfterPointSave ? '保存して記録' : '点数保存'}</button>
             </div>
           </form>
         </div>
