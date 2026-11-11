@@ -1372,6 +1372,71 @@ button, input {
   background: #fee2e2;
 }
 
+.calendar-add-help {
+  margin: 0;
+  color: var(--text-choco, #64748b);
+  font-size: 12px;
+}
+
+.calendar-variant-actions {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.calendar-variant-actions .sale-tap-button small {
+  display: block;
+  margin-top: 3px;
+}
+
+.calendar-point-edit {
+  min-height: 44px;
+  border: 1px solid var(--sales-line);
+  border-radius: 12px;
+  background: #fff8eb;
+  color: var(--text-choco, #604631);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 8px 12px;
+}
+
+.calendar-sale-point-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+
+.calendar-sale-point-form label,
+.calendar-sale-point-form p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.calendar-sale-point-form input {
+  grid-column: 1 / -1;
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--sales-line);
+  border-radius: 12px;
+  font-size: 16px;
+}
+
+.calendar-sale-point-form button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: #e4f3d9;
+  color: var(--text-choco, #604631);
+  font-weight: 800;
+}
+
+.calendar-sale-point-form .secondary { background: #fff0d6; }
+.calendar-sale-point-form p { color: #b91c1c; }
+
 .sales-empty-state {
   display: grid;
   place-items: center;
